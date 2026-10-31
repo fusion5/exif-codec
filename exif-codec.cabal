@@ -1,0 +1,53 @@
+cabal-version:   3.12
+name:            exif-codec
+version:         0.1.0.0
+synopsis:        Exif metadata codec
+
+-- description:
+license:         MIT
+license-file:    LICENSE
+author:          Dragos Ionita
+maintainer:      dragos.0x55@gmail.com
+
+-- copyright:
+category:        Codec
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+-- extra-source-files:
+
+common shared-properties
+  default-language:   GHC2024
+  default-extensions:
+    CPP
+    DataKinds
+    DeriveFunctor
+    DeriveGeneric
+    GeneralizedNewtypeDeriving
+    ImportQualifiedPost
+    LambdaCase
+    OverloadedStrings
+    QuasiQuotes
+    RecordWildCards
+    ScopedTypeVariables
+    StrictData
+    TemplateHaskell
+    TypeApplications
+
+  ghc-options:
+    -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists
+    -Wmissing-home-modules -Wno-orphans -Wpartial-fields
+    -Wredundant-constraints -Wunused-packages -Wunused-top-binds
+    -Wno-pattern-namespace-specifier -Wno-unrecognised-warning-flags
+
+library
+  import:            shared-properties
+  exposed-modules:   Codec.Exif
+
+  build-depends:
+    , base
+    , bytestring
+    , hsexif
+
+  hs-source-dirs:    src

@@ -9,7 +9,6 @@
     self,
     nixpkgs,
     flake-parts,
-    hs-bindgen,
     ...
   }:
     flake-parts.lib.mkFlake {inherit inputs;} {
@@ -32,6 +31,22 @@
         };
         devShells.default = ghc.shellFor {
           packages = ps: [exif-codec];
+          nativeBuildInputs = with ghc; [
+            haskell-language-server
+            implicit-hie
+            cabal-install
+            cabal-fmt
+            # Connect `hs-bindgen` to the Clang toolchain and `wuffs`.
+            # Fixes [Error] [Libclang] [clang] unable to resolve #include <....h>:
+            pkgs.pkg-config # IMPORTANT: must be only in the native shell
+            # pkgs.wuffs
+            pkgs.exiftool
+          ];
+          buildInputs = [];
+          # make hls happy about missing .so files
+          shellHook = ''
+            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath [exif-codec]}:$LD_LIBRARY_PATH
+          '';
         };
       };
     };

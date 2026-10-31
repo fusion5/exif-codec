@@ -1,14 +1,13 @@
 module Main (main) where
 
 import Arbitrary ()
-import Codec.Exif (ExifTag, ExifValue (..), decodeExif, imageDescription)
+import Codec.Exif (ExifTag, ExifValue (..), decodeExif, encodeExif, imageDescription)
 import Data.ByteString qualified as BS
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Prelude
 import Test.Hspec (describe, hspec, it, shouldBe)
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (ioProperty)
 
 helloWorldExif :: BS.ByteString
 helloWorldExif = BS.pack
@@ -62,6 +61,4 @@ main = hspec $ do
 
   describe "QuickCheck Arbitrary Exif Map" $ do
     prop "exif encode decode roundtrip" $ \(m :: Map ExifTag ExifValue) ->
-      ioProperty $ do
-        print m
-        pure True
+      decodeExif (encodeExif m) `shouldBe` Right m

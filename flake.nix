@@ -26,8 +26,10 @@
         exif-codec = ghc.callCabal2nix "exif-codec" (pkgs.lib.cleanSource ./.) {};
       in {
         packages = {
+          default = exif-codec;
         };
         checks = {
+          check-default = exif-codec;
         };
         devShells.default = ghc.shellFor {
           packages = ps: [exif-codec];
@@ -36,10 +38,6 @@
             implicit-hie
             cabal-install
             cabal-fmt
-            # Connect `hs-bindgen` to the Clang toolchain and `wuffs`.
-            # Fixes [Error] [Libclang] [clang] unable to resolve #include <....h>:
-            pkgs.pkg-config # IMPORTANT: must be only in the native shell
-            # pkgs.wuffs
             pkgs.exiftool
           ];
           buildInputs = [];

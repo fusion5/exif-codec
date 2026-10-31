@@ -131,7 +131,7 @@ main = do
       prop "exif encode decode roundtrip Motorola" $ \(m :: Map.Map ExifTag ExifValue) ->
         decodeExif (encodeExif Motorola m) `shouldBe` Right m
 
-    describe "Parse exif from sample files" $ do
+    describe "Parse exif from sample files with roundtrip" $ do
       forM_ jpegs $ \sample ->
         it ("parse file " <> sample) $ do
           blob <- extractExifBlob sample
@@ -140,4 +140,9 @@ main = do
             Left e -> do
               print e
               pending
-            Right exifBS -> decodeExif exifBS `shouldSatisfy` isRight
+            Right exifBS ->
+              case decodeExif exifBS of
+                Left err ->
+                  expectationFailure $ "Failed to decode original camera EXIF: " <> show err
+                Right originalMap -> do
+                  decodeExif (encodeExif Intel originalMap) `shouldBe` Right originalMap

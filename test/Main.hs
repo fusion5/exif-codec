@@ -5,6 +5,7 @@ import Codec.Exif
 import Data.ByteString qualified as BS
 import Data.Map (Map)
 import Data.Map qualified as Map
+import Data.Word
 import Test.Hspec (describe, hspec, it, shouldBe)
 import Test.Hspec.QuickCheck (prop)
 import Prelude
@@ -15,7 +16,11 @@ normalizeExifMap = Map.map normalizeValue
     normalizeValue :: ExifValue -> ExifValue
     normalizeValue (ExifRationalList [(n, d)]) = ExifRational n d
     normalizeValue (ExifNumberList [n]) = ExifNumber n
-    -- (Optional) If HsExif drops empty lists entirely, you might need to filter them out of the Map
+    normalizeValue (ExifUnknown fmt count val) =
+      ExifUnknown fmt (wrap32 count) (wrap32 val)
+      where
+        wrap32 :: Int -> Int
+        wrap32 x = fromIntegral (fromIntegral x :: Word32)
     normalizeValue other = other
 
 helloWorldExif :: BS.ByteString

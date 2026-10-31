@@ -1,31 +1,32 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Arbitrary
-  ( genTagLocation
-  , genExifTag
-  , genExifValue
-  ) where
+  ( genTagLocation,
+    genExifTag,
+    genExifValue,
+  )
+where
 
 import Codec.Exif
-  ( ExifTag (..)
-  , ExifValue (..)
-  , TagLocation (..)
-  , allTags
+  ( ExifTag (..),
+    ExifValue (..),
+    TagLocation (..),
+    allTags,
   )
 import Data.ByteString qualified as BS
 import Data.Text qualified as T
-import Prelude
 import Test.QuickCheck
-  ( Arbitrary (..)
-  , Gen
-  , Positive (..)
-  , elements
-  , frequency
-  , listOf
-  , listOf1
-  , oneof
-  , shrink
+  ( Arbitrary (..),
+    Gen,
+    Positive (..),
+    elements,
+    frequency,
+    listOf,
+    listOf1,
+    oneof,
+    shrink,
   )
+import Prelude
 
 genTagLocation :: Gen TagLocation
 genTagLocation = elements [IFD0, ExifSubIFD, GpsSubIFD]
@@ -34,32 +35,34 @@ instance Arbitrary TagLocation where
   arbitrary = genTagLocation
 
 genExifTag :: Gen ExifTag
-genExifTag = frequency
-  [ (8, elements allTags)
-  , (2, ExifTag <$> arbitrary <*> arbitrary <*> arbitrary <*> pure (T.pack . show))
-  ]
+genExifTag =
+  frequency
+    [ (8, elements allTags),
+      (2, ExifTag <$> arbitrary <*> arbitrary <*> arbitrary <*> pure (T.pack . show))
+    ]
 
 instance Arbitrary ExifTag where
   arbitrary = genExifTag
 
 genExifValue :: Gen ExifValue
-genExifValue = oneof
-  [ ExifNumber <$> arbitrary
-  , ExifText <$> listOf (elements (['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ " ,.-_"))
-  , do
-      n <- arbitrary
-      Positive d <- arbitrary
-      pure (ExifRational n d)
-  , ExifNumberList <$> listOf1 arbitrary
-  , do
-      rats <- listOf1 $ do
+genExifValue =
+  oneof
+    [ ExifNumber <$> arbitrary,
+      ExifText <$> listOf (elements (['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ " ,.-_")),
+      do
         n <- arbitrary
         Positive d <- arbitrary
-        pure (n, d)
-      pure (ExifRationalList rats)
-  , ExifUndefined . BS.pack <$> arbitrary
-  , ExifUnknown <$> arbitrary <*> arbitrary <*> arbitrary
-  ]
+        pure (ExifRational n d),
+      ExifNumberList <$> listOf1 arbitrary,
+      do
+        rats <- listOf1 $ do
+          n <- arbitrary
+          Positive d <- arbitrary
+          pure (n, d)
+        pure (ExifRationalList rats),
+      ExifUndefined . BS.pack <$> arbitrary,
+      ExifUnknown <$> arbitrary <*> arbitrary <*> arbitrary
+    ]
 
 instance Arbitrary ExifValue where
   arbitrary = genExifValue

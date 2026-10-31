@@ -1,13 +1,14 @@
 module Codec.Exif
-  ( encodeExif,
-    decodeExif,
+  ( decodeExif,
     ParseError (..),
     allTags,
+    Codec.Exif.Encode.encodeExif,
     module Codec.Exif.Types,
     module Graphics.HsExif,
   )
 where
 
+import Codec.Exif.Encode (encodeExif)
 import Codec.Exif.Types (ByteAlign (..))
 import Control.Monad (replicateM, unless)
 import Data.Binary.Get
@@ -64,9 +65,6 @@ decodeExif bs =
    in case runGetOrFail parseTiff lazyBytes of
         Left (_, _, err) -> Left (ParseError err)
         Right (_, _, tags) -> Right tags
-
-encodeExif :: Map ExifTag ExifValue -> BS.ByteString
-encodeExif = error "TODO: counterpart Put functions to write encodeExif"
 
 parseTiff :: Get (Map ExifTag ExifValue)
 parseTiff = do

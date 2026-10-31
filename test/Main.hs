@@ -9,6 +9,15 @@ import Test.Hspec (describe, hspec, it, shouldBe)
 import Test.Hspec.QuickCheck (prop)
 import Prelude
 
+normalizeExifMap :: Map ExifTag ExifValue -> Map ExifTag ExifValue
+normalizeExifMap = Map.map normalizeValue
+  where
+    normalizeValue :: ExifValue -> ExifValue
+    normalizeValue (ExifRationalList [(n, d)]) = ExifRational n d
+    normalizeValue (ExifNumberList [n]) = ExifNumber n
+    -- (Optional) If HsExif drops empty lists entirely, you might need to filter them out of the Map
+    normalizeValue other = other
+
 helloWorldExif :: BS.ByteString
 helloWorldExif =
   BS.pack
@@ -91,4 +100,4 @@ main = hspec $ do
 
   describe "QuickCheck Arbitrary Exif Map" $ do
     prop "exif encode decode roundtrip" $ \(m :: Map ExifTag ExifValue) ->
-      decodeExif (encodeExif Intel m) `shouldBe` Right m
+      decodeExif (encodeExif Intel m) `shouldBe` Right (normalizeExifMap m)

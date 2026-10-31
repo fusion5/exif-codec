@@ -7,7 +7,7 @@ import Data.ByteString qualified as BS
 import Data.Char (toLower)
 import Data.Either
 import Data.Map qualified as Map
-import JPEGParser (extractExifBlob)
+import JPEGParser
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, (</>))
@@ -136,6 +136,7 @@ main = do
         it ("parse file " <> sample) $ do
           blob <- extractExifBlob sample
           case blob of
+            Left NoExifDataFound {} -> pure ()
             Left e -> do
               print e
               pending

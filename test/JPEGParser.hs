@@ -1,4 +1,4 @@
-module JPEGParser (extractExifBlob) where
+module JPEGParser (extractExifBlob, ParseError (..)) where
 
 import Data.Binary.Get
 import Data.ByteString qualified as BS
@@ -6,7 +6,7 @@ import Data.ByteString.Lazy qualified as LBS
 
 data ParseError
   = ParseError LBS.ByteString ByteOffset String
-  | IncompleteFile ByteOffset
+  | NoExifDataFound ByteOffset
   deriving (Show)
 
 extractExifBlob :: FilePath -> IO (Either ParseError BS.ByteString)
@@ -14,7 +14,7 @@ extractExifBlob path = do
   lazyBytes <- LBS.readFile path
   case runGetOrFail getExif lazyBytes of
     Right (_, _, Just exifData) -> pure $ Right exifData
-    Right (_, byteOffset, Nothing) -> pure $ Left $ IncompleteFile byteOffset
+    Right (_, byteOffset, Nothing) -> pure $ Left $ NoExifDataFound byteOffset
     Left (byteString, byteOffset, errorMessage) ->
       pure $ Left $ ParseError byteString byteOffset errorMessage
 

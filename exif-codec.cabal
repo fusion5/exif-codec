@@ -66,5 +66,4 @@ test-suite exif-codec-test
     , containers
     , exif-codec
     , hspec
-    , hsexif
 

@@ -1,9 +1,8 @@
 module Main (main) where
 
-import Codec.Exif qualified as Exif
+import Codec.Exif (ExifValue (..), decodeExif, imageDescription)
 import Data.ByteString qualified as BS
 import Data.Map qualified as Map
-import Graphics.HsExif (ExifValue (..), imageDescription)
 import Prelude
 import Test.Hspec (describe, hspec, it, shouldBe)
 
@@ -54,5 +53,5 @@ main :: IO ()
 main = hspec $ do
   describe "decodeExif" $ do
     it "decodes EXIF metadata from raw TIFF payload" $ do
-      let result = Exif.decodeExif helloWorldExif
+      let result = decodeExif helloWorldExif
       result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))

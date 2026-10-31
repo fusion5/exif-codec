@@ -2,6 +2,7 @@ module Codec.Exif
   ( encodeExif
   , decodeExif
   , ParseError(..)
+  , module Graphics.HsExif
   ) where
 
 import Control.Monad (replicateM, unless)
@@ -29,7 +30,7 @@ import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word8)
-import Graphics.HsExif
+import Graphics.HsExif hiding (parseExif, parseFileExif)
 import Prelude
 
 newtype ParseError = ParseError String

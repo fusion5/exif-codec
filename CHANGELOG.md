@@ -1,4 +1,4 @@
-# Revision history for wuffs-hs
+# Revision history for exif-codec
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

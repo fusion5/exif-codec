@@ -60,9 +60,9 @@
           ];
           buildInputs = [];
           # make hls happy about missing .so files
-          shellHook = ''
-            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath [exif-codec]}:$LD_LIBRARY_PATH
-          '';
+          # shellHook = ''
+          #   export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath [exif-codec]}:$LD_LIBRARY_PATH
+          # '';
         };
       };
     };

@@ -63,12 +63,18 @@ test-suite exif-codec-test
   type:           exitcode-stdio-1.0
   hs-source-dirs: test
   main-is:        Main.hs
-  other-modules:  Arbitrary
+  other-modules:
+    Arbitrary
+    JPEGParser
+
   build-depends:
     , base
+    , binary
     , bytestring
     , containers
+    , directory
     , exif-codec
+    , filepath
     , hspec
     , QuickCheck
     , text

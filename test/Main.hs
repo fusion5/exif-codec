@@ -2,10 +2,16 @@ module Main (main) where
 
 import Arbitrary ()
 import Codec.Exif
+import Control.Monad
 import Data.ByteString qualified as BS
-import Data.Map (Map)
+import Data.Char (toLower)
+import Data.Either
 import Data.Map qualified as Map
-import Test.Hspec (describe, hspec, it, shouldBe)
+import JPEGParser (extractExifBlob)
+import System.Directory (doesDirectoryExist, listDirectory)
+import System.Environment (lookupEnv)
+import System.FilePath (takeExtension, (</>))
+import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Prelude
 
@@ -82,15 +88,53 @@ helloWorldExif =
       0x00
     ]
 
-main :: IO ()
-main = hspec $ do
-  describe "decodeExif" $ do
-    it "decodes EXIF metadata from raw TIFF payload" $ do
-      let result = decodeExif helloWorldExif
-      result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))
+findJpegs :: FilePath -> IO [FilePath]
+findJpegs dir = do
+  entries <- listDirectory dir
+  let paths = map (dir </>) entries
+  foldM categorize [] paths
+  where
+    categorize :: [FilePath] -> FilePath -> IO [FilePath]
+    categorize acc path = do
+      isDir <- doesDirectoryExist path
+      if isDir
+        then do
+          subFiles <- findJpegs path
+          return (acc <> subFiles)
+        else do
+          let ext = map toLower (takeExtension path)
+          if ext `elem` [".jpg", ".jpeg"]
+            then return (path : acc)
+            else return acc
 
-  describe "QuickCheck Arbitrary Exif Map" $ do
-    prop "exif encode decode roundtrip Intel" $ \(m :: Map ExifTag ExifValue) ->
-      decodeExif (encodeExif Intel m) `shouldBe` Right m
-    prop "exif encode decode roundtrip Motorola" $ \(m :: Map ExifTag ExifValue) ->
-      decodeExif (encodeExif Motorola m) `shouldBe` Right m
+getSamplesDir :: IO FilePath
+getSamplesDir = do
+  mDir <- lookupEnv "EXIF_SAMPLES_DIR"
+  case mDir of
+    Just dir -> pure dir
+    Nothing -> error "EXIF_SAMPLES_DIR environment variable is not set. Run via 'nix develop'."
+
+main :: IO ()
+main = do
+  samples <- getSamplesDir
+  jpegs <- findJpegs samples
+  print jpegs
+  hspec $ do
+    describe "decodeExif" $ do
+      it "decodes EXIF metadata from raw TIFF payload" $ do
+        let result = decodeExif helloWorldExif
+        result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))
+
+    describe "QuickCheck Arbitrary Exif Map" $ do
+      prop "exif encode decode roundtrip Intel" $ \(m :: Map.Map ExifTag ExifValue) ->
+        decodeExif (encodeExif Intel m) `shouldBe` Right m
+      prop "exif encode decode roundtrip Motorola" $ \(m :: Map.Map ExifTag ExifValue) ->
+        decodeExif (encodeExif Motorola m) `shouldBe` Right m
+
+    describe "Parse exif from sample files" $ do
+      forM_ jpegs $ \sample ->
+        it ("parse file " <> sample) $ do
+          blob <- extractExifBlob sample
+          case blob of
+            Nothing -> pending
+            Just exifBS -> decodeExif exifBS `shouldSatisfy` isRight

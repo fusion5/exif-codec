@@ -3,7 +3,7 @@ module Codec.Exif.Encode
   )
 where
 
-import Codec.Exif.Types (ByteAlign (..))
+import Codec.Exif.Types
 import Control.Monad (forM_, when)
 import Data.Binary.Put
   ( Put,
@@ -105,13 +105,21 @@ encodeValue ba tagKey = \case
     EncodedEntry tagKey fmt (fromIntegral count) (LBS.toStrict $ runPut $ putW32P ba (fromIntegral val))
 
 -- ---------------------------------------------------------------------------
--- Top-level encoder
+-- Top-level encoders
+
+-- Encodes exif With an Exif\NUL\NUL prefix.
+encodeExif :: Envelope -> BS.ByteString
+encodeExif (Envelope header) = exifPrefix <> encodeExifRaw header
 
 -- | Encode a 'Map' of EXIF tags and values into a raw TIFF-structured byte
 -- string. The 'ByteAlign' argument controls whether the output uses
 -- little-endian ('Intel') or big-endian ('Motorola') byte order.
-encodeExif :: ByteAlign -> Map ExifTag ExifValue -> BS.ByteString
-encodeExif ba m = LBS.toStrict $ runPut $ do
+encodeExifRaw :: Header -> BS.ByteString
+encodeExifRaw (IntelOrder exifMap) = encodeExifRaw' Intel exifMap
+encodeExifRaw (MotorolaOrder exifMap) = encodeExifRaw' Motorola exifMap
+
+encodeExifRaw' :: ByteAlign -> Map ExifTag ExifValue -> BS.ByteString
+encodeExifRaw' ba m = LBS.toStrict $ runPut $ do
   -- TIFF header
   putByteString $ case ba of Intel -> "II"; Motorola -> "MM"
   putW16P ba 42

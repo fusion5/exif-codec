@@ -1,15 +1,20 @@
 module Codec.Exif
   ( decodeExif,
+    decodeExifRaw,
     ParseError (..),
+    Envelope (..),
+    Header (..),
     allTags,
     Codec.Exif.Encode.encodeExif,
-    module Codec.Exif.Types,
+    getExifMap,
+    module Exports,
     module Graphics.HsExif,
   )
 where
 
 import Codec.Exif.Encode (encodeExif)
-import Codec.Exif.Types (ByteAlign (..))
+import Codec.Exif.Types
+import Codec.Exif.Types as Exports (Envelope (..), Header (..))
 import Control.Monad (replicateM, unless)
 import Data.Binary.Get
   ( Get,
@@ -38,7 +43,9 @@ import Data.Word (Word16, Word32, Word8)
 import Graphics.HsExif hiding (parseExif, parseFileExif)
 import Prelude
 
-newtype ParseError = ParseError String
+data ParseError
+  = ParseError String
+  | MissingExifPrefix
   deriving (Show, Eq)
 
 getWord16 :: ByteAlign -> Get Word16
@@ -53,37 +60,51 @@ putWord32 :: ByteAlign -> Word32 -> Put
 putWord32 Intel = putWord32le
 putWord32 Motorola = putWord32be
 
--- | Read EXIF data directly from an EXIF payload (without container image headers).
--- Handles both raw TIFF headers and payloads with an "Exif\0\0" prefix.
-decodeExif :: BS.ByteString -> Either ParseError (Map ExifTag ExifValue)
-decodeExif bs =
-  let tiffBytes =
-        if "Exif\NUL\NUL" `BS.isPrefixOf` bs
-          then BS.drop 6 bs
-          else bs
-      lazyBytes = LBS.fromStrict tiffBytes
-   in case runGetOrFail parseTiff lazyBytes of
-        Left (_, _, err) -> Left (ParseError err)
-        Right (_, _, tags) -> Right tags
+getExifMap :: Envelope -> Map ExifTag ExifValue
+getExifMap (Envelope (IntelOrder exifMap)) = exifMap
+getExifMap (Envelope (MotorolaOrder exifMap)) = exifMap
 
-parseTiff :: Get (Map ExifTag ExifValue)
+-- | Read EXIF data directly from an EXIF payload (without a container image).
+-- Must have an "Exif\0\0" prefix.
+decodeExif :: BS.ByteString -> Either ParseError Envelope
+decodeExif bs =
+  if exifPrefix `BS.isPrefixOf` bs
+    then Envelope <$> decodeExifRaw (BS.drop 6 bs)
+    else Left MissingExifPrefix
+
+-- | Read EXIF data directly from an EXIF payload (without a container image).
+-- Must not have an "Exif\0\0" prefix.
+decodeExifRaw :: BS.ByteString -> Either ParseError Header
+decodeExifRaw tiffBytes =
+  let lazyBytes = LBS.fromStrict tiffBytes
+   in case runGetOrFail parseTiff lazyBytes of
+        Left (_, _, err) -> Left $ ParseError err
+        Right (_, _, header) -> Right header
+
+parseTiff :: Get Header
 parseTiff = do
   (byteAlign, ifdOffset) <- lookAhead parseTiffHeader
   tags <- parseIfd byteAlign IFD0 ifdOffset
-  return $ Map.fromList tags
+  let tagMap = Map.fromList tags
+
+  -- Wrap the parsed map in the correct Header constructor
+  -- based on the ByteAlign detected by parseTiffHeader
+  pure $ case byteAlign of
+    Intel -> IntelOrder tagMap
+    Motorola -> MotorolaOrder tagMap
 
 parseTiffHeader :: Get (ByteAlign, Int)
 parseTiffHeader = do
   byteAlignV <- Char8.unpack <$> getByteString 2
   byteAlign <- case byteAlignV of
-    "II" -> return Intel
-    "MM" -> return Motorola
+    "II" -> pure Intel
+    "MM" -> pure Motorola
     _ -> fail $ "Unknown byte alignment: " ++ byteAlignV
   alignControl <- toInteger <$> getWord16 byteAlign
   unless (alignControl == 0x2a || (byteAlign == Intel && (alignControl == 0x55 || alignControl == 0x4f52))) $
     fail "exif byte alignment mismatch"
   ifdOffset <- fromIntegral . toInteger <$> getWord32 byteAlign
-  return (byteAlign, ifdOffset)
+  pure (byteAlign, ifdOffset)
 
 parseIfd :: ByteAlign -> TagLocation -> Int -> Get [(ExifTag, ExifValue)]
 parseIfd byteAlign ifdId offset = do
@@ -105,7 +126,7 @@ parseIfEntry byteAlign ifdId = do
   format <- getWord16 byteAlign
   numComponents <- fromIntegral <$> getWord32 byteAlign
   content <- getWord32 byteAlign
-  return $ case (ifdId, tagNumber) of
+  pure $ case (ifdId, tagNumber) of
     (IFD0, 0x8769) -> SubIFD ExifSubIFD (fromIntegral content)
     (IFD0, 0x8825) -> SubIFD GpsSubIFD (fromIntegral content)
     (_, tagId) -> Tag (getExifTag ifdId tagId) (decodeEntry byteAlign format numComponents content)
@@ -175,7 +196,7 @@ readRationalContents :: (Int -> Int -> a) -> ByteAlign -> Get a
 readRationalContents c byteAlign = do
   numerator <- fromIntegral <$> getWord32 byteAlign
   denominator <- fromIntegral <$> getWord32 byteAlign
-  return $ c numerator denominator
+  pure $ c numerator denominator
 
 unsignedRationalValueHandler :: ValueHandler
 unsignedRationalValueHandler =
@@ -226,7 +247,7 @@ readSignedRationalContents :: (Int -> Int -> a) -> ByteAlign -> Get a
 readSignedRationalContents c byteAlign = do
   numerator <- signedInt32ToInt <$> getWord32 byteAlign
   denominator <- signedInt32ToInt <$> getWord32 byteAlign
-  return $ c numerator denominator
+  pure $ c numerator denominator
 
 signedRationalValueHandler :: ValueHandler
 signedRationalValueHandler =
@@ -256,9 +277,9 @@ valueHandlers =
 decodeEntry :: ByteAlign -> Word16 -> Int -> Word32 -> Get ExifValue
 decodeEntry byteAlign format amount payload =
   case getHandler format of
-    Just handler | isInline handler -> return $ parseInline byteAlign handler amount (LBS.toStrict $ runPut $ putWord32 byteAlign payload)
+    Just handler | isInline handler -> pure $ parseInline byteAlign handler amount (LBS.toStrict $ runPut $ putWord32 byteAlign payload)
     Just handler -> parseOffset byteAlign handler amount payload
-    Nothing -> return $ ExifUnknown format amount (fromIntegral payload)
+    Nothing -> pure $ ExifUnknown format amount (fromIntegral payload)
   where
     isInline handler = dataLength handler * amount <= 4
 
@@ -281,7 +302,7 @@ parseOffset byteAlign handler amount offset =
     skip (fromIntegral offset)
     let bsLength = amount * dataLength handler
     bs <- getByteString bsLength
-    return (parseInline byteAlign handler amount bs)
+    pure $ parseInline byteAlign handler amount bs
 
 signedInt32ToInt :: Word32 -> Int
 signedInt32ToInt w = fromIntegral (fromIntegral w :: Int32)

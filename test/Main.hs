@@ -122,19 +122,22 @@ main = do
     describe "decodeExif" $ do
       it "decodes EXIF metadata from raw payload" $ do
         let result = decodeExif helloWorldExif
-        result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))
+        result
+          `shouldBe` Right
+            (Envelope $ IntelOrder $ Map.singleton imageDescription (ExifText "hello world"))
 
     describe "QuickCheck Arbitrary Exif Map" $ do
       prop "exif encode decode roundtrip Intel" $ \(m :: Map.Map ExifTag ExifValue) ->
-        decodeExif (encodeExif Intel m) `shouldBe` Right m
+        let envelope = Envelope $ IntelOrder m
+         in decodeExif (encodeExif envelope) `shouldBe` Right envelope
       prop "exif encode decode roundtrip Motorola" $ \(m :: Map.Map ExifTag ExifValue) ->
-        decodeExif (encodeExif Motorola m) `shouldBe` Right m
+        let envelope = Envelope $ MotorolaOrder m
+         in decodeExif (encodeExif envelope) `shouldBe` Right envelope
 
     describe "Parse exif from sample files with roundtrip" $ do
       forM_ jpegs $ \sample ->
-        it ("parse file " <> sample) $ do
-          blob <- extractExifBlob sample
-          case blob of
+        it ("parse file " <> sample) $
+          extractExifBlob sample >>= \case
             Left NoExifDataFound {} -> pure ()
             Left e -> do
               print e
@@ -143,5 +146,5 @@ main = do
               case decodeExif exifBS of
                 Left err ->
                   expectationFailure $ "Failed to decode original camera EXIF: " <> show err
-                Right originalMap -> do
-                  decodeExif (encodeExif Intel originalMap) `shouldBe` Right originalMap
+                Right originalEnvelope ->
+                  decodeExif (encodeExif originalEnvelope) `shouldBe` Right originalEnvelope

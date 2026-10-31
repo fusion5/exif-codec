@@ -3,10 +3,12 @@ module Codec.Exif
     decodeExif,
     ParseError (..),
     allTags,
+    module Codec.Exif.Types,
     module Graphics.HsExif,
   )
 where
 
+import Codec.Exif.Types (ByteAlign (..))
 import Control.Monad (replicateM, unless)
 import Data.Binary.Get
   ( Get,
@@ -37,9 +39,6 @@ import Prelude
 
 newtype ParseError = ParseError String
   deriving (Show, Eq)
-
-data ByteAlign = Intel | Motorola
-  deriving (Eq)
 
 getWord16 :: ByteAlign -> Get Word16
 getWord16 Intel = getWord16le

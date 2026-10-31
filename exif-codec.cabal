@@ -42,10 +42,11 @@ common shared-properties
     -Wno-pattern-namespace-specifier -Wno-unrecognised-warning-flags
 
 library
-  import:            shared-properties
+  import:          shared-properties
   exposed-modules:
     Codec.Exif
     Codec.Exif.Encode
+    Codec.Exif.Types
 
   build-depends:
     , base
@@ -55,20 +56,19 @@ library
     , hsexif
     , text
 
-  hs-source-dirs:    src
+  hs-source-dirs:  src
 
 test-suite exif-codec-test
-  import:             shared-properties
-  type:               exitcode-stdio-1.0
-  hs-source-dirs:     test
-  main-is:            Main.hs
-  other-modules:      Arbitrary
+  import:         shared-properties
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Main.hs
+  other-modules:  Arbitrary
   build-depends:
-    , QuickCheck
     , base
     , bytestring
     , containers
     , exif-codec
     , hspec
+    , QuickCheck
     , text
-

@@ -5,23 +5,9 @@ import Codec.Exif
 import Data.ByteString qualified as BS
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Word
 import Test.Hspec (describe, hspec, it, shouldBe)
 import Test.Hspec.QuickCheck (prop)
 import Prelude
-
-normalizeExifMap :: Map ExifTag ExifValue -> Map ExifTag ExifValue
-normalizeExifMap = Map.map normalizeValue
-  where
-    normalizeValue :: ExifValue -> ExifValue
-    normalizeValue (ExifRationalList [(n, d)]) = ExifRational n d
-    normalizeValue (ExifNumberList [n]) = ExifNumber n
-    normalizeValue (ExifUnknown fmt count val) =
-      ExifUnknown fmt (wrap32 count) (wrap32 val)
-      where
-        wrap32 :: Int -> Int
-        wrap32 x = fromIntegral (fromIntegral x :: Word32)
-    normalizeValue other = other
 
 helloWorldExif :: BS.ByteString
 helloWorldExif =
@@ -105,4 +91,4 @@ main = hspec $ do
 
   describe "QuickCheck Arbitrary Exif Map" $ do
     prop "exif encode decode roundtrip" $ \(m :: Map ExifTag ExifValue) ->
-      decodeExif (encodeExif Intel m) `shouldBe` Right (normalizeExifMap m)
+      decodeExif (encodeExif Intel m) `shouldBe` Right m

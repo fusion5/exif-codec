@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Arbitrary ()
 import Codec.Exif (ExifValue (..), decodeExif, imageDescription)
 import Data.ByteString qualified as BS
 import Data.Map qualified as Map

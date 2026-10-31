@@ -2,6 +2,7 @@ module Codec.Exif
   ( encodeExif
   , decodeExif
   , ParseError(..)
+  , allTags
   , module Graphics.HsExif
   ) where
 

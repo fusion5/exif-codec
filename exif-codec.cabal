@@ -60,10 +60,13 @@ test-suite exif-codec-test
   type:               exitcode-stdio-1.0
   hs-source-dirs:     test
   main-is:            Main.hs
+  other-modules:      Arbitrary
   build-depends:
+    , QuickCheck
     , base
     , bytestring
     , containers
     , exif-codec
     , hspec
+    , text
 

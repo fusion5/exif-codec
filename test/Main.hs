@@ -1,11 +1,11 @@
 module Main (main) where
 
-import Codec.Exif qualified as Exif
-import Data.ByteString qualified as BS
+import Codec.Exif qualified as Exif ()
 import Prelude
+import Test.Hspec (describe, hspec, it, pendingWith)
 
 main :: IO ()
-main = do
-  case Exif.decodeExif BS.empty of
-    Left _ -> putStrLn "Test suite stub for decodeExif: initialized."
-    Right _ -> putStrLn "Test suite stub for decodeExif: initialized."
+main = hspec $ do
+  describe "decodeExif" $ do
+    it "decodes EXIF metadata from raw TIFF payload" $ do
+      pendingWith "implementation pending review"

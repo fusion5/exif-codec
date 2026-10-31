@@ -4,12 +4,19 @@ import Data.Binary.Get
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 
-extractExifBlob :: FilePath -> IO (Maybe BS.ByteString)
+data ParseError
+  = ParseError LBS.ByteString ByteOffset String
+  | IncompleteFile ByteOffset
+  deriving (Show)
+
+extractExifBlob :: FilePath -> IO (Either ParseError BS.ByteString)
 extractExifBlob path = do
   lazyBytes <- LBS.readFile path
   case runGetOrFail getExif lazyBytes of
-    Right (_, _, Just exifData) -> pure (Just exifData)
-    _ -> pure Nothing
+    Right (_, _, Just exifData) -> pure $ Right exifData
+    Right (_, byteOffset, Nothing) -> pure $ Left $ IncompleteFile byteOffset
+    Left (byteString, byteOffset, errorMessage) ->
+      pure $ Left $ ParseError byteString byteOffset errorMessage
 
 getExif :: Get (Maybe BS.ByteString)
 getExif = do

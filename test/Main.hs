@@ -136,5 +136,7 @@ main = do
         it ("parse file " <> sample) $ do
           blob <- extractExifBlob sample
           case blob of
-            Nothing -> pending
-            Just exifBS -> decodeExif exifBS `shouldSatisfy` isRight
+            Left e -> do
+              print e
+              pending
+            Right exifBS -> decodeExif exifBS `shouldSatisfy` isRight

@@ -43,7 +43,9 @@ common shared-properties
 
 library
   import:            shared-properties
-  exposed-modules:   Codec.Exif
+  exposed-modules:
+    Codec.Exif
+    Codec.Exif.Encode
 
   build-depends:
     , base

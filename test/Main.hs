@@ -118,10 +118,9 @@ main :: IO ()
 main = do
   samples <- getSamplesDir
   jpegs <- findJpegs samples
-  print jpegs
   hspec $ do
     describe "decodeExif" $ do
-      it "decodes EXIF metadata from raw TIFF payload" $ do
+      it "decodes EXIF metadata from raw payload" $ do
         let result = decodeExif helloWorldExif
         result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))
 

@@ -90,5 +90,7 @@ main = hspec $ do
       result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))
 
   describe "QuickCheck Arbitrary Exif Map" $ do
-    prop "exif encode decode roundtrip" $ \(m :: Map ExifTag ExifValue) ->
+    prop "exif encode decode roundtrip Intel" $ \(m :: Map ExifTag ExifValue) ->
       decodeExif (encodeExif Intel m) `shouldBe` Right m
+    prop "exif encode decode roundtrip Motorola" $ \(m :: Map ExifTag ExifValue) ->
+      decodeExif (encodeExif Motorola m) `shouldBe` Right m

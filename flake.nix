@@ -24,6 +24,21 @@
         };
         ghc = pkgs.haskell.packages.ghc912.extend (hfinal: hprev: {});
         exif-codec = ghc.callCabal2nix "exif-codec" (pkgs.lib.cleanSource ./.) {};
+        exifSamplesSource = pkgs.fetchFromGitHub {
+          owner = "ianare";
+          repo = "exif-samples";
+          rev = "master";
+          hash = "sha256-imVQZnG+WmzHBM0Gqj8+fG96h2PAxKkH2JNC/Ban3jw=";
+        };
+        exifSamplesDir = pkgs.stdenv.mkDerivation {
+          name = "ianare-exif-samples-jpg";
+          src = "${exifSamplesSource}/jpg";
+
+          installPhase = ''
+            mkdir -p $out
+            cp -r ./* $out/
+          '';
+        };
       in {
         packages = {
           default = exif-codec;
@@ -32,6 +47,9 @@
           check-default = exif-codec;
         };
         devShells.default = ghc.shellFor {
+          env = {
+            EXIF_SAMPLES_DIR = "${exifSamplesDir}";
+          };
           packages = ps: [exif-codec];
           nativeBuildInputs = with ghc; [
             haskell-language-server

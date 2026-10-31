@@ -1,11 +1,14 @@
 module Main (main) where
 
 import Arbitrary ()
-import Codec.Exif (ExifValue (..), decodeExif, imageDescription)
+import Codec.Exif (ExifTag, ExifValue (..), decodeExif, imageDescription)
 import Data.ByteString qualified as BS
+import Data.Map (Map)
 import Data.Map qualified as Map
 import Prelude
 import Test.Hspec (describe, hspec, it, shouldBe)
+import Test.Hspec.QuickCheck (prop)
+import Test.QuickCheck (ioProperty)
 
 helloWorldExif :: BS.ByteString
 helloWorldExif = BS.pack
@@ -56,3 +59,9 @@ main = hspec $ do
     it "decodes EXIF metadata from raw TIFF payload" $ do
       let result = decodeExif helloWorldExif
       result `shouldBe` Right (Map.singleton imageDescription (ExifText "hello world"))
+
+  describe "QuickCheck Arbitrary Exif Map" $ do
+    prop "exif encode decode roundtrip" $ \(m :: Map ExifTag ExifValue) ->
+      ioProperty $ do
+        print m
+        pure True

@@ -54,3 +54,13 @@ library
     , text
 
   hs-source-dirs:    src
+
+test-suite exif-codec-test
+  import:             shared-properties
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     test
+  main-is:            Main.hs
+  build-depends:
+    , base
+    , bytestring
+    , exif-codec

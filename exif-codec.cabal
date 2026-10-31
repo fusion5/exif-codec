@@ -62,6 +62,9 @@ test-suite exif-codec-test
   main-is:            Main.hs
   build-depends:
     , base
-    -- , bytestring
+    , bytestring
+    , containers
     , exif-codec
     , hspec
+    , hsexif
+

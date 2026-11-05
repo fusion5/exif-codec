@@ -1,10 +1,7 @@
 module Codec.Exif.Types
   ( -- * TIFF Header & Envelope
     TiffHeader (..),
-    ExifHeader,
-    Header,
-    ExifEnvelope (..),
-    Envelope,
+    Exif (..),
     tiffByteAlign,
     tiffData,
     ByteAlign (..),
@@ -14,7 +11,6 @@ module Codec.Exif.Types
     ExifData (..),
     IFD (..),
     DirEntry (..),
-    RawDirEntry (..),
     Thumbnail (..),
 
     -- * Exif formats and values
@@ -35,65 +31,9 @@ where
 
 import Data.ByteString qualified as BS
 import Data.Int (Int16, Int32, Int8)
-import Data.Map (Map)
-import Data.Word (Word16, Word32, Word8)
+import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
-import Graphics.HsExif
-  ( ExifTag (..),
-    ExifValue (..),
-  )
 import Prelude
-
--- ---------------------------------------------------------------------------
--- TIFF Header & Envelope
-
--- | The TIFF header and structure, with constructors for Intel (little-endian)
--- and Motorola (big-endian) byte order, nesting the payload (such as 'ExifData').
-data TiffHeader a
-  = IntelOrder a
-  | MotorolaOrder a
-  deriving (Eq, Show, Generic, Functor)
-
--- | Specialization of 'TiffHeader' nesting the 'ExifData' AST.
-type ExifHeader = TiffHeader ExifData
-
--- | Legacy type alias for backwards compatibility with existing map-based code.
-type Header = TiffHeader (Map ExifTag ExifValue)
-
--- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
-newtype ExifEnvelope a = Envelope
-  { envelopePayload :: a
-  }
-  deriving (Show, Eq, Generic, Functor)
-
--- | Default Exif envelope wrapping a 'Header' for backwards compatibility.
-type Envelope = ExifEnvelope Header
-
--- | Extract the byte alignment from a 'TiffHeader'.
-tiffByteAlign :: TiffHeader a -> ByteAlign
-tiffByteAlign = \case
-  IntelOrder _ -> Intel
-  MotorolaOrder _ -> Motorola
-
--- | Extract the payload from a 'TiffHeader'.
-tiffData :: TiffHeader a -> a
-tiffData = \case
-  IntelOrder a -> a
-  MotorolaOrder a -> a
-
--- | Byte alignment (endianness) of the TIFF/EXIF payload.
-data ByteAlign
-  = -- | Little-endian ("II")
-    Intel
-  | -- | Big-endian ("MM")
-    Motorola
-  deriving (Eq, Show, Generic)
-
-exifPrefix :: BS.ByteString
-exifPrefix = "Exif\NUL\NUL"
-
--- ---------------------------------------------------------------------------
--- Well-known pointer tags
 
 -- | Tag 0x8769: Offset to Exif SubIFD
 exifOffsetTag :: Word16
@@ -107,92 +47,29 @@ gpsInfoTag = 0x8825
 interopOffsetTag :: Word16
 interopOffsetTag = 0xA005
 
--- ---------------------------------------------------------------------------
--- Data Formats (TIFF 6.0 / Exif Specification Types 1-12)
+-- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
+newtype Exif = Envelope
+  { envelopePayload :: TiffHeader
+  }
+  deriving (Show, Eq, Generic)
 
--- | TIFF/Exif data format (field type code).
-data ExifFormat
-  = -- | 1: 8-bit unsigned integer (BYTE)
-    FormatUnsignedByte
-  | -- | 2: Null-terminated ASCII string (ASCII)
-    FormatAsciiString
-  | -- | 3: 16-bit unsigned integer (SHORT)
-    FormatUnsignedShort
-  | -- | 4: 32-bit unsigned integer (LONG)
-    FormatUnsignedLong
-  | -- | 5: Two 32-bit unsigned integers: numerator, denominator (RATIONAL)
-    FormatUnsignedRational
-  | -- | 6: 8-bit signed integer (SBYTE)
-    FormatSignedByte
-  | -- | 7: 8-bit uninterpreted byte (UNDEFINED)
-    FormatUndefined
-  | -- | 8: 16-bit signed integer (SSHORT)
-    FormatSignedShort
-  | -- | 9: 32-bit signed integer (SLONG)
-    FormatSignedLong
-  | -- | 10: Two 32-bit signed integers: numerator, denominator (SRATIONAL)
-    FormatSignedRational
-  | -- | 11: 32-bit IEEE float (FLOAT)
-    FormatSingleFloat
-  | -- | 12: 64-bit IEEE double float (DOUBLE)
-    FormatDoubleFloat
-  | -- | Unknown or non-standard format code
-    FormatUnknown Word16
+-- | The TIFF header and structure, with constructors for Intel (little-endian)
+-- and Motorola (big-endian) byte order, nesting the payload (such as 'ExifData').
+data TiffHeader
+  = IntelOrder ExifData
+  | MotorolaOrder ExifData
   deriving (Eq, Show, Generic)
 
--- | Convert an 'ExifFormat' to its corresponding 16-bit integer code.
-formatCode :: ExifFormat -> Word16
-formatCode = \case
-  FormatUnsignedByte -> 1
-  FormatAsciiString -> 2
-  FormatUnsignedShort -> 3
-  FormatUnsignedLong -> 4
-  FormatUnsignedRational -> 5
-  FormatSignedByte -> 6
-  FormatUndefined -> 7
-  FormatSignedShort -> 8
-  FormatSignedLong -> 9
-  FormatSignedRational -> 10
-  FormatSingleFloat -> 11
-  FormatDoubleFloat -> 12
-  FormatUnknown w -> w
+-- | Byte order (endianness) of the TIFF/EXIF payload.
+data ByteOrder
+  = -- | Little-endian ("II")
+    Intel
+  | -- | Big-endian ("MM")
+    Motorola
+  deriving (Eq, Show, Generic)
 
--- | Parse a 16-bit integer code into an 'ExifFormat'.
-codeToFormat :: Word16 -> ExifFormat
-codeToFormat = \case
-  1 -> FormatUnsignedByte
-  2 -> FormatAsciiString
-  3 -> FormatUnsignedShort
-  4 -> FormatUnsignedLong
-  5 -> FormatUnsignedRational
-  6 -> FormatSignedByte
-  7 -> FormatUndefined
-  8 -> FormatSignedShort
-  9 -> FormatSignedLong
-  10 -> FormatSignedRational
-  11 -> FormatSingleFloat
-  12 -> FormatDoubleFloat
-  w -> FormatUnknown w
-
--- | Byte size per component for each format.
-formatBytesPerComponent :: ExifFormat -> Int
-formatBytesPerComponent = \case
-  FormatUnsignedByte -> 1
-  FormatAsciiString -> 1
-  FormatUnsignedShort -> 2
-  FormatUnsignedLong -> 4
-  FormatUnsignedRational -> 8
-  FormatSignedByte -> 1
-  FormatUndefined -> 1
-  FormatSignedShort -> 2
-  FormatSignedLong -> 4
-  FormatSignedRational -> 8
-  FormatSingleFloat -> 4
-  FormatDoubleFloat -> 8
-  FormatUnknown _ -> 1
-
--- ---------------------------------------------------------------------------
--- Rational numbers
+exifPrefix :: BS.ByteString
+exifPrefix = "Exif\NUL\NUL"
 
 -- | Unsigned rational number (numerator, denominator).
 data URational = URational
@@ -211,53 +88,52 @@ data SRational = SRational
 -- ---------------------------------------------------------------------------
 -- Typed entry values
 
--- | High-level typed representation of an Exif entry's payload value.
-data TagValue
-  = ValUnsignedByte [Word8]
-  | ValAscii BS.ByteString
-  | ValUnsignedShort [Word16]
-  | ValUnsignedLong [Word32]
-  | ValUnsignedRational [URational]
-  | ValSignedByte [Int8]
-  | ValUndefined BS.ByteString
-  | ValSignedShort [Int16]
-  | ValSignedLong [Int32]
-  | ValSignedRational [SRational]
-  | ValSingleFloat [Float]
-  | ValDoubleFloat [Double]
-  | ValUnknown ExifFormat Word32 BS.ByteString
-  deriving (Eq, Show, Generic)
-
--- ---------------------------------------------------------------------------
--- Directory Entries
-
--- | On-wire 12-byte TIFF directory entry.
-data RawDirEntry = RawDirEntry
-  { rawEntryTag :: Word16,
-    rawEntryFormat :: Word16,
-    rawEntryCount :: Word32,
-    rawEntryOffsetOrInline :: Word32
+-- Low level directory entry
+data RawDirectoryEntry = RawDirectoryEntry
+  { -- | Determines what the entry is, e.g. original date time, flash, focal length, rotation...
+    rdeTag :: Word16,
+    -- | The data type (byte, ascii, short, long...)
+    rdeType :: Word16,
+    -- | The number of values present
+    rdeCount :: Word32,
+    -- | If the value is <= 4 bytes then it's a literal, otherwise it's an offset form
+    -- the beginning of the Exif data.
+    rdeOffsetOrValue :: Word32
   }
-  deriving (Eq, Show, Generic)
 
--- | An IFD directory entry holding its tag key, format, component count,
--- and byte payload.
-data DirEntry = DirEntry
-  { dirEntryTag :: Word16,
-    dirEntryFormat :: ExifFormat,
-    dirEntryCount :: Word32,
-    dirEntryData :: BS.ByteString
-  }
+-- | High-level typed representation of an Exif entry's payload values.
+data DirectoryEntry
+  = UnsignedByte [Word8]
+  | Ascii BS.ByteString
+  | UnsignedShort [Word16]
+  | UnsignedLong [Word32]
+  | UnsignedRational [URational]
+  | SignedByte [Int8]
+  | Undefined BS.ByteString
+  | SignedShort [Int16]
+  | SignedLong [Int32]
+  | SignedRational [SRational]
+  | SingleFloat [Float]
+  | DoubleFloat [Double]
+  | UnsignedLong8 [Word64]
+  | SignedLong8 [Word64]
+  | Unknown Word16 Word32 BS.ByteString
   deriving (Eq, Show, Generic)
 
 -- ---------------------------------------------------------------------------
 -- Image File Directory (IFD)
 
+data RawIFD = RawIFD
+  { rifdNumberOfEntries :: Word16,
+    rifdDirectoryEntries :: [RawDirectoryEntry],
+    rifdValues :: [BS.ByteString],
+    rifdNext :: RawIFD
+  }
+
 -- | An Image File Directory (IFD) containing a list of entries and
 -- the offset pointing to the next IFD (0 if none).
-data IFD = IFD
-  { ifdEntries :: [DirEntry],
-    ifdNextOffset :: Word32
+newtype IFD = IFD
+  { ifdEntries :: [DirectoryEntry]
   }
   deriving (Eq, Show, Generic)
 
@@ -272,6 +148,11 @@ data Thumbnail
 
 -- ---------------------------------------------------------------------------
 -- Exif Abstract Syntax Tree
+
+data RawExifData = RawExifData
+  { reIFD0 :: RawIFD
+  , reSubIFD :: Maybe RawIFD
+  }
 
 -- | The Exif data structure (AST), reflecting the layout described in the Exif specification:
 -- primary IFD0 (main image), optional Exif SubIFD (camera settings),

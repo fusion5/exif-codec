@@ -1,216 +1,179 @@
-module Codec.Exif.Encode
-  ( encodeExif,
-  )
-where
+module Codec.Exif.Encode (encodeExif, encodeExifRaw) where
 
 import Codec.Exif.Types
-import Control.Monad (forM_, when)
-import Data.Binary.Put
-  ( Put,
-    putByteString,
-    putInt32be,
-    putInt32le,
-    putWord16be,
-    putWord16le,
-    putWord32be,
-    putWord32le,
-    putWord8,
-    runPut,
-  )
 import Data.ByteString qualified as BS
-import Data.ByteString.Lazy qualified as LBS
-import Data.Int (Int32)
+import Data.ByteString.Builder qualified as B
+import Data.ByteString.Lazy qualified as BL
+-- import Data.Int (Int32)
 import Data.List (sortBy)
-import Data.Map (Map)
-import Data.Map qualified as Map
+import Data.Maybe (isJust)
 import Data.Ord (comparing)
-import Data.Word (Word16, Word32)
-import Graphics.HsExif
-  ( ExifTag (..),
-    ExifValue (..),
-    TagLocation (..),
-  )
-import Prelude
+import Data.Word
 
--- ---------------------------------------------------------------------------
--- Endian-aware put helpers
-
-putW16P :: ByteAlign -> Word16 -> Put
-putW16P Intel = putWord16le
-putW16P Motorola = putWord16be
-
-putW32P :: ByteAlign -> Word32 -> Put
-putW32P Intel = putWord32le
-putW32P Motorola = putWord32be
-
-putI32P :: ByteAlign -> Int32 -> Put
-putI32P Intel = putInt32le
-putI32P Motorola = putInt32be
-
--- ---------------------------------------------------------------------------
--- IFD entry encoding
-
-data EncodedEntry = EncodedEntry
-  { entryTagKey :: Word16,
-    entryFormat :: Word16,
-    entryCount :: Word32,
-    entryData :: BS.ByteString
-  }
-
-encodeValue :: ByteAlign -> Word16 -> ExifValue -> EncodedEntry
-encodeValue ba tagKey = \case
-  ExifNumber n ->
-    if n < 0
-      then EncodedEntry tagKey 9 1 $ LBS.toStrict $ runPut $ putI32P ba (fromIntegral n)
-      else
-        if n <= 65535
-          then EncodedEntry tagKey 3 1 $ LBS.toStrict $ runPut $ putW16P ba (fromIntegral n)
-          else EncodedEntry tagKey 4 1 $ LBS.toStrict $ runPut $ putW32P ba (fromIntegral n)
-  ExifText str ->
-    let raw = BS.pack (map (fromIntegral . fromEnum) str) <> BS.singleton 0
-     in EncodedEntry tagKey 2 (fromIntegral (BS.length raw)) raw
-  ExifRational num den ->
-    let isSigned = num < 0 || den < 0
-        fmt = if isSigned then 10 else 5
-        bs =
-          LBS.toStrict $
-            runPut $
-              if isSigned
-                then putI32P ba (fromIntegral num) >> putI32P ba (fromIntegral den)
-                else putW32P ba (fromIntegral num) >> putW32P ba (fromIntegral den)
-     in EncodedEntry tagKey fmt 1 bs
-  ExifNumberList xs ->
-    let anyNeg = any (< 0) xs
-        allShort = all (\x -> x >= 0 && x <= 65535) xs
-        bs
-          | anyNeg = LBS.toStrict $ runPut $ mapM_ (putI32P ba . (fromIntegral :: Int -> Int32)) xs
-          | allShort = LBS.toStrict $ runPut $ mapM_ (putW16P ba . (fromIntegral :: Int -> Word16)) xs
-          | otherwise = LBS.toStrict $ runPut $ mapM_ (putW32P ba . (fromIntegral :: Int -> Word32)) xs
-        fmt
-          | anyNeg = 9
-          | allShort = 3
-          | otherwise = 4
-     in EncodedEntry tagKey fmt (fromIntegral (length xs)) bs
-  ExifRationalList rs ->
-    let anySigned = any (\(n, d) -> n < 0 || d < 0) rs
-        fmt = if anySigned then 10 else 5
-        bs = LBS.toStrict $ runPut $ forM_ rs $ \(n, d) ->
-          if anySigned
-            then putI32P ba (fromIntegral n) >> putI32P ba (fromIntegral d)
-            else putW32P ba (fromIntegral n) >> putW32P ba (fromIntegral d)
-     in EncodedEntry tagKey fmt (fromIntegral (length rs)) bs
-  ExifUndefined bs ->
-    EncodedEntry tagKey 7 (fromIntegral (BS.length bs)) bs
-  ExifUnknown fmt count val ->
-    EncodedEntry tagKey fmt (fromIntegral count) (LBS.toStrict $ runPut $ putW32P ba (fromIntegral val))
-
--- ---------------------------------------------------------------------------
--- Top-level encoders
-
--- Encodes exif With an Exif\NUL\NUL prefix.
-encodeExif :: Envelope -> BS.ByteString
+-- | Encodes an entire Exif envelope including the "Exif\NUL\NUL" prefix.
+encodeExif :: ExifEnvelope -> BS.ByteString
 encodeExif (Envelope header) = exifPrefix <> encodeExifRaw header
 
--- | Encode a 'Map' of EXIF tags and values into a raw TIFF-structured byte
--- string. The 'ByteAlign' argument controls whether the output uses
--- little-endian ('Intel') or big-endian ('Motorola') byte order.
-encodeExifRaw :: Header -> BS.ByteString
-encodeExifRaw (IntelOrder exifMap) = encodeExifRaw' Intel exifMap
-encodeExifRaw (MotorolaOrder exifMap) = encodeExifRaw' Motorola exifMap
+-- | Encodes just the TIFF layout (header + payload) without the APP1 prefix.
+encodeExifRaw :: TiffHeader -> BS.ByteString
+encodeExifRaw header = BL.toStrict $
+  B.toLazyByteString $
+    case header of
+      IntelOrder exif -> buildTiff Intel exif
+      MotorolaOrder exif -> buildTiff Motorola exif
 
-encodeExifRaw' :: ByteAlign -> Map ExifTag ExifValue -> BS.ByteString
-encodeExifRaw' ba m = LBS.toStrict $ runPut $ do
-  -- TIFF header
-  putByteString $ case ba of Intel -> "II"; Motorola -> "MM"
-  putW16P ba 42
-  putW32P ba 8
+putW16 :: ByteAlign -> Word16 -> B.Builder
+putW16 Intel = B.word16LE
+putW16 Motorola = B.word16BE
 
-  -- IFD0 (including pointers to sub-IFDs)
-  putIFD ifd0WithOffsets
+putW32 :: ByteAlign -> Word32 -> B.Builder
+putW32 Intel = B.word32LE
+putW32 Motorola = B.word32BE
 
-  -- ExifSubIFD
-  when hasExifSub $ putIFD exifSubWithOffsets
+-- putI32 :: ByteAlign -> Int32 -> B.Builder
+-- putI32 Intel = B.int32LE
+-- putI32 Motorola = B.int32BE
 
-  -- GpsSubIFD
-  when hasGpsSub $ putIFD gpsSubWithOffsets
+-- Constructs the binary block for an IFD & its associated extra data
+buildIFDBlock :: ByteAlign -> Word32 -> [DirEntry] -> Word32 -> B.Builder
+buildIFDBlock align startOffset entries nextOffset =
+  let sortedEntries = sortBy (comparing dirEntryTag) entries
+      count = fromIntegral (length sortedEntries) :: Word16
+      ifdSize = 2 + 12 * fromIntegral count + 4
+      extraStartOffset = startOffset + ifdSize
+      (entriesBuilder, extraBuilder, _) =
+        foldl' (buildDirEntry align extraStartOffset) (mempty, mempty, 0) sortedEntries
+   in putW16 align count <> entriesBuilder <> putW32 align nextOffset <> extraBuilder
 
-  -- Out-of-line value data
-  putDataSection
+buildDirEntry ::
+  ByteAlign ->
+  Word32 ->
+  (B.Builder, B.Builder, Word32) ->
+  DirEntry ->
+  (B.Builder, B.Builder, Word32)
+buildDirEntry align extraBase (eb, xb, xsz) (DirEntry tag fmt cnt dat) =
+  let datLen = fromIntegral (BS.length dat)
+      fmtCode = formatCode fmt
+   in if datLen <= 4
+        then
+          -- Left-justify <= 4 byte inline payloads via padding zeros (per spec, regardless of
+          -- endianness)
+          let paddedDat = dat <> BS.replicate (4 - BS.length dat) 0
+              entryB =
+                putW16 align tag
+                  <> putW16 align fmtCode
+                  <> putW32 align cnt
+                  <> B.byteString paddedDat
+           in (eb <> entryB, xb, xsz)
+        else
+          let offset = extraBase + xsz
+              entryB =
+                putW16 align tag
+                  <> putW16 align fmtCode
+                  <> putW32 align cnt
+                  <> putW32 align offset
+              padLen = if even datLen then 0 else 1
+              paddedExtra = B.byteString dat <> B.byteString (BS.replicate padLen 0)
+           in (eb <> entryB, xb <> paddedExtra, xsz + datLen + fromIntegral padLen)
+
+-- | Internal pure builder for the TIFF structure.
+buildTiff :: ByteAlign -> ExifData -> B.Builder
+buildTiff align exif = headerBlock <> ifd0B <> exifB <> gpsB <> interopB <> ifd1B <> thumbDataB
   where
-    entries = Map.toList m
+    enc32 w = BL.toStrict $ B.toLazyByteString $ putW32 align w
 
-    ifd0Raw =
-      [ (tag, val)
-      | (tag, val) <- entries,
-        tagLocation tag == IFD0,
-        tagKey tag /= 0x8769,
-        tagKey tag /= 0x8825
-      ]
-    exifSubRaw = [(tag, val) | (tag, val) <- entries, tagLocation tag == ExifSubIFD]
-    gpsSubRaw = [(tag, val) | (tag, val) <- entries, tagLocation tag == GpsSubIFD]
+    headerBlock = case align of
+      Intel -> B.byteString "II\x2A\x00" <> putW32 align 8
+      Motorola -> B.byteString "MM\x00\x2A" <> putW32 align 8
 
-    ifd0Entries = [encodeValue ba (tagKey tag) val | (tag, val) <- ifd0Raw]
-    exifSubEntries = [encodeValue ba (tagKey tag) val | (tag, val) <- exifSubRaw]
-    gpsSubEntries = [encodeValue ba (tagKey tag) val | (tag, val) <- gpsSubRaw]
+    -- Calculates the total block size of an IFD (directories + out-of-line padded extra data)
+    calcIFDTotalSize :: [DirEntry] -> Word32 -> Word32
+    calcIFDTotalSize baseEntries addedCount =
+      let count = fromIntegral (length baseEntries) + addedCount :: Word32
+          ifdSize = 2 + 12 * count + 4
+          extraSize =
+            sum
+              [ let l = fromIntegral (BS.length dat) :: Word32
+                 in if l <= 4 then 0 else l + (if even l then 0 else 1)
+              | DirEntry _ _ _ dat <- baseEntries
+              ]
+       in ifdSize + extraSize
 
-    hasExifSub = not (null exifSubEntries)
-    hasGpsSub = not (null gpsSubEntries)
+    -- Purify base entries of any pre-existing pointers so we don't duplicate tags
+    ifd0BaseEntries =
+      filter
+        (\e -> dirEntryTag e `notElem` [exifOffsetTag, gpsInfoTag])
+        (ifdEntries (exifIFD0 exif))
+    exifBaseEntries =
+      maybe
+        []
+        (filter (\e -> dirEntryTag e /= interopOffsetTag) . ifdEntries)
+        (exifSubIFD exif)
+    gpsBaseEntries = maybe [] ifdEntries (exifGpsSubIFD exif)
+    interopBaseEntries = maybe [] ifdEntries (exifInteropSubIFD exif)
+    ifd1BaseEntries = case exifIFD1 exif of
+      Just ifd ->
+        filter
+          (\e -> dirEntryTag e `notElem` [0x0201, 0x0202, 0x0111, 0x0117])
+          (ifdEntries ifd)
+      Nothing -> []
 
-    numIFD0 = length ifd0Entries + (if hasExifSub then 1 else 0) + (if hasGpsSub then 1 else 0)
-    lenIFD0 = 2 + fromIntegral numIFD0 * 12 + 4 :: Word32
+    hasExif = isJust (exifSubIFD exif)
+    hasGps = isJust (exifGpsSubIFD exif)
+    hasInterop = isJust (exifInteropSubIFD exif)
+    hasThumb = isJust (exifThumbnail exif)
+    hasIFD1 = isJust (exifIFD1 exif) || hasThumb
 
-    numExifSub = length exifSubEntries
-    lenExifSub = if hasExifSub then 2 + fromIntegral numExifSub * 12 + 4 else 0 :: Word32
-    offsetExifSub = 8 + lenIFD0
+    -- Calculate total layout footprint sequentially
+    ifd0Total = calcIFDTotalSize ifd0BaseEntries ((if hasExif then 1 else 0) + (if hasGps then 1 else 0))
+    exifTotal = if hasExif then calcIFDTotalSize exifBaseEntries (if hasInterop then 1 else 0) else 0
+    gpsTotal = if hasGps then calcIFDTotalSize gpsBaseEntries 0 else 0
+    interopTotal = if hasInterop then calcIFDTotalSize interopBaseEntries 0 else 0
+    ifd1Total = if hasIFD1 then calcIFDTotalSize ifd1BaseEntries (if hasThumb then 2 else 0) else 0
 
-    numGpsSub = length gpsSubEntries
-    lenGpsSub = if hasGpsSub then 2 + fromIntegral numGpsSub * 12 + 4 else 0 :: Word32
-    offsetGpsSub = 8 + lenIFD0 + lenExifSub
+    thumbSize = case exifThumbnail exif of
+      Just (JpegThumbnail bs) -> BS.length bs
+      Just (TiffThumbnail bs) -> BS.length bs
+      Nothing -> 0
+    thumbPadLen = if even thumbSize then 0 else 1
 
-    dataStartOffset = 8 + lenIFD0 + lenExifSub + lenGpsSub
+    -- Exact sequential byte offsets (Header is exactly 8 bytes)
+    offIFD0 = 8
+    offExif = offIFD0 + ifd0Total
+    offGps = offExif + exifTotal
+    offInterop = offGps + gpsTotal
+    offIFD1 = if hasIFD1 then offInterop + interopTotal else 0
+    offThumb = if hasThumb then offIFD1 + ifd1Total else 0
 
-    exifSubPtr = EncodedEntry 0x8769 4 1 (LBS.toStrict $ runPut $ putW32P ba offsetExifSub)
-    gpsSubPtr = EncodedEntry 0x8825 4 1 (LBS.toStrict $ runPut $ putW32P ba offsetGpsSub)
+    -- Compile specific blocks with dynamically injected pointer tags
+    ifd0Entries =
+      ifd0BaseEntries
+        ++ [DirEntry exifOffsetTag FormatUnsignedLong 1 (enc32 offExif) | hasExif]
+        ++ [DirEntry gpsInfoTag FormatUnsignedLong 1 (enc32 offGps) | hasGps]
+    ifd0B = buildIFDBlock align offIFD0 ifd0Entries offIFD1
 
-    allIFD0 =
-      sortBy (comparing entryTagKey) $
-        ifd0Entries ++ [exifSubPtr | hasExifSub] ++ [gpsSubPtr | hasGpsSub]
-    allExifSub = sortBy (comparing entryTagKey) exifSubEntries
-    allGpsSub = sortBy (comparing entryTagKey) gpsSubEntries
+    exifEntries =
+      exifBaseEntries
+        ++ [DirEntry interopOffsetTag FormatUnsignedLong 1 (enc32 offInterop) | hasInterop]
+    exifB = if hasExif then buildIFDBlock align offExif exifEntries 0 else mempty
 
-    isInline e = BS.length (entryData e) <= 4
+    gpsB = if hasGps then buildIFDBlock align offGps gpsBaseEntries 0 else mempty
 
-    assignOffsets :: Word32 -> [EncodedEntry] -> [(EncodedEntry, Maybe Word32)]
-    assignOffsets _ [] = []
-    assignOffsets curOff (e : es)
-      | isInline e = (e, Nothing) : assignOffsets curOff es
-      | otherwise =
-          let len = fromIntegral (BS.length (entryData e)) :: Word32
-              paddedLen = if odd len then len + 1 else len
-           in (e, Just curOff) : assignOffsets (curOff + paddedLen) es
+    interopB = if hasInterop then buildIFDBlock align offInterop interopBaseEntries 0 else mempty
 
-    allEntriesWithOffsets =
-      assignOffsets dataStartOffset (allIFD0 ++ allExifSub ++ allGpsSub)
+    thumbEntries = case exifThumbnail exif of
+      Just (JpegThumbnail bs) ->
+        [ DirEntry 0x0201 FormatUnsignedLong 1 (enc32 offThumb),
+          DirEntry 0x0202 FormatUnsignedLong 1 (enc32 (fromIntegral $ BS.length bs))
+        ]
+      Just (TiffThumbnail bs) ->
+        [ DirEntry 0x0111 FormatUnsignedLong 1 (enc32 offThumb),
+          DirEntry 0x0117 FormatUnsignedLong 1 (enc32 (fromIntegral $ BS.length bs))
+        ]
+      Nothing -> []
 
-    n0 = length allIFD0
-    nExif = length allExifSub
-    (ifd0WithOffsets, rest1) = splitAt n0 allEntriesWithOffsets
-    (exifSubWithOffsets, gpsSubWithOffsets) = splitAt nExif rest1
-
-    outOfLineEntries = [(e, off) | (e, Just off) <- allEntriesWithOffsets]
-
-    putIFD entriesWithOffsets = do
-      putW16P ba (fromIntegral (length entriesWithOffsets))
-      forM_ entriesWithOffsets $ \(e, mOffset) -> do
-        putW16P ba (entryTagKey e)
-        putW16P ba (entryFormat e)
-        putW32P ba (entryCount e)
-        case mOffset of
-          Nothing -> putByteString $ entryData e <> BS.replicate (4 - BS.length (entryData e)) 0
-          Just off -> putW32P ba off
-      putW32P ba 0
-
-    putDataSection =
-      forM_ outOfLineEntries $ \(e, _) -> do
-        putByteString (entryData e)
-        when (odd (BS.length (entryData e))) $ putWord8 0
+    ifd1B = if hasIFD1 then buildIFDBlock align offIFD1 (ifd1BaseEntries ++ thumbEntries) 0 else mempty
+    thumbDataB = case exifThumbnail exif of
+      Just (JpegThumbnail bs) -> B.byteString bs <> B.byteString (BS.replicate thumbPadLen 0)
+      Just (TiffThumbnail bs) -> B.byteString bs <> B.byteString (BS.replicate thumbPadLen 0)
+      Nothing -> mempty

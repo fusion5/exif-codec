@@ -1,36 +1,10 @@
 module Codec.Exif.Types
-  ( -- * TIFF Header & Envelope
-    TiffHeader (..),
-    Exif (..),
-    tiffByteAlign,
-    tiffData,
-    ByteAlign (..),
-    exifPrefix,
-
-    -- * Exif AST: Core data structure
-    ExifData (..),
-    IFD (..),
-    DirEntry (..),
-    Thumbnail (..),
-
-    -- * Exif formats and values
-    ExifFormat (..),
-    formatCode,
-    codeToFormat,
-    formatBytesPerComponent,
-    URational (..),
-    SRational (..),
-    TagValue (..),
-
-    -- * Well-known Exif pointer tags
-    exifOffsetTag,
-    gpsInfoTag,
-    interopOffsetTag,
+  ( module Codec.Exif.Types,
   )
 where
 
 import Data.ByteString qualified as BS
-import Data.Int (Int16, Int32, Int8)
+import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
 import Prelude
@@ -49,16 +23,21 @@ interopOffsetTag = 0xA005
 
 -- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
 newtype Exif = Envelope
-  { envelopePayload :: TiffHeader
+  { envelopePayload :: Tiff
   }
   deriving (Show, Eq, Generic)
 
 -- | The TIFF header and structure, with constructors for Intel (little-endian)
 -- and Motorola (big-endian) byte order, nesting the payload (such as 'ExifData').
-data TiffHeader
+data Tiff
   = IntelOrder ExifData
   | MotorolaOrder ExifData
   deriving (Eq, Show, Generic)
+
+data RawTiff = RawTiff
+  { rtHeader :: ByteOrder,
+    rtExifData :: RawExifData
+  }
 
 -- | Byte order (endianness) of the TIFF/EXIF payload.
 data ByteOrder
@@ -102,7 +81,22 @@ data RawDirectoryEntry = RawDirectoryEntry
   }
 
 -- | High-level typed representation of an Exif entry's payload values.
-data DirectoryEntry
+data DirectoryEntry = DirectoryEntry
+  { deTag :: Word16,
+    deValue :: DirectoryEntryValue
+  }
+  deriving (Eq, Show, Generic)
+
+-- | Representing an entry during the encoding pipeline:
+data PendingDirectoryEntry = PendingDirectoryEntry
+  { peTag :: Word16,
+    peType :: Word16,
+    peCount :: Word32,
+    -- | Always holds the raw payload bytes (whether 2, 4, or 5000 bytes)
+    peData :: BS.ByteString
+  }
+
+data DirectoryEntryValue
   = UnsignedByte [Word8]
   | Ascii BS.ByteString
   | UnsignedShort [Word16]
@@ -116,7 +110,7 @@ data DirectoryEntry
   | SingleFloat [Float]
   | DoubleFloat [Double]
   | UnsignedLong8 [Word64]
-  | SignedLong8 [Word64]
+  | SignedLong8 [Int64]
   | Unknown Word16 Word32 BS.ByteString
   deriving (Eq, Show, Generic)
 
@@ -126,8 +120,7 @@ data DirectoryEntry
 data RawIFD = RawIFD
   { rifdNumberOfEntries :: Word16,
     rifdDirectoryEntries :: [RawDirectoryEntry],
-    rifdValues :: [BS.ByteString],
-    rifdNext :: RawIFD
+    rifdNextOffset :: Word32
   }
 
 -- | An Image File Directory (IFD) containing a list of entries and
@@ -149,9 +142,8 @@ data Thumbnail
 -- ---------------------------------------------------------------------------
 -- Exif Abstract Syntax Tree
 
-data RawExifData = RawExifData
-  { reIFD0 :: RawIFD
-  , reSubIFD :: Maybe RawIFD
+newtype RawExifData = RawExifData
+  { rawIFDs :: [RawIFD]
   }
 
 -- | The Exif data structure (AST), reflecting the layout described in the Exif specification:

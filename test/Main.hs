@@ -6,7 +6,7 @@ import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Char (toLower)
 import Data.Either
-import Data.Map qualified as Map
+import Data.Map qualified as M
 import JPEGParser
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (lookupEnv)
@@ -124,15 +124,23 @@ main = do
         let result = decodeExif helloWorldExif
         result
           `shouldBe` Right
-            (Envelope $ IntelOrder $ Map.singleton imageDescription (ExifText "hello world"))
+            ( Exif
+                { exifPayload =
+                    IntelOrder
+                      ( ExifData
+                          { exifIFD =
+                              [ IFD
+                                  { ifdEntries = M.fromList [(270, Ascii "hello world\NUL")]
+                                  }
+                              ]
+                          }
+                      )
+                }
+            )
 
     describe "QuickCheck Arbitrary Exif Map" $ do
-      prop "exif encode decode roundtrip Intel" $ \(m :: Map.Map ExifTag ExifValue) ->
-        let envelope = Envelope $ IntelOrder m
-         in decodeExif (encodeExif envelope) `shouldBe` Right envelope
-      prop "exif encode decode roundtrip Motorola" $ \(m :: Map.Map ExifTag ExifValue) ->
-        let envelope = Envelope $ MotorolaOrder m
-         in decodeExif (encodeExif envelope) `shouldBe` Right envelope
+      prop "exif encode decode roundtrip Intel" $ \exif ->
+        decodeExif (encodeExif exif) `shouldBe` Right exif
 
     describe "Parse exif from sample files with roundtrip" $ do
       forM_ jpegs $ \sample ->

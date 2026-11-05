@@ -45,8 +45,8 @@ library
   import:          shared-properties
   exposed-modules:
     Codec.Exif
-    Codec.Exif.Encode
     Codec.Exif.Decode
+    Codec.Exif.Encode
     Codec.Exif.Types
 
   build-depends:
@@ -55,6 +55,7 @@ library
     , bytestring
     , containers
     , hsexif
+    , mtl
     , text
 
   hs-source-dirs:  src
@@ -78,4 +79,4 @@ test-suite exif-codec-test
     , filepath
     , hspec
     , QuickCheck
-    , text
+    -- , text

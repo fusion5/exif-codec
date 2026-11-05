@@ -1,179 +1,213 @@
-module Codec.Exif.Encode (encodeExif, encodeExifRaw) where
+module Codec.Exif.Encode
+  ( encodeExif,
+    lowerExif,
+    encodeRawExif,
+  )
+where
 
 import Codec.Exif.Types
+import Control.Monad (forM, forM_)
+import Control.Monad.State.Strict
+import Data.Binary.Get (Get, getWord32be, getWord32le, runGet)
+import Data.Binary.Put
 import Data.ByteString qualified as BS
-import Data.ByteString.Builder qualified as B
 import Data.ByteString.Lazy qualified as BL
--- import Data.Int (Int32)
-import Data.List (sortBy)
-import Data.Maybe (isJust)
-import Data.Ord (comparing)
+import Data.Int
+import Data.Map qualified as M
 import Data.Word
+import Prelude
 
--- | Encodes an entire Exif envelope including the "Exif\NUL\NUL" prefix.
-encodeExif :: ExifEnvelope -> BS.ByteString
-encodeExif (Envelope header) = exifPrefix <> encodeExifRaw header
+-- | Complete encoding pipeline
+encodeExif :: Exif -> BS.ByteString
+encodeExif exif =
+  let (rawExif, dataBlocks) = lowerExif exif
+   in exifPrefix <> encodeRawExif rawExif dataBlocks
 
--- | Encodes just the TIFF layout (header + payload) without the APP1 prefix.
-encodeExifRaw :: TiffHeader -> BS.ByteString
-encodeExifRaw header = BL.toStrict $
-  B.toLazyByteString $
-    case header of
-      IntelOrder exif -> buildTiff Intel exif
-      MotorolaOrder exif -> buildTiff Motorola exif
+-- ---------------------------------------------------------------------------
+-- Phase 1: AST Lowering & Memory Layout with State Monad
 
-putW16 :: ByteAlign -> Word16 -> B.Builder
-putW16 Intel = B.word16LE
-putW16 Motorola = B.word16BE
+-- | State tracking both the linear byte offset and the accumulated external data blocks
+data LayoutState = LayoutState
+  { lsOffset :: !Word32,
+    lsBlocks :: [BS.ByteString] -- Stored in reverse order for O(1) prepending
+  }
+  deriving (Show)
 
-putW32 :: ByteAlign -> Word32 -> B.Builder
-putW32 Intel = B.word32LE
-putW32 Motorola = B.word32BE
+type LayoutM = State LayoutState
 
--- putI32 :: ByteAlign -> Int32 -> B.Builder
--- putI32 Intel = B.int32LE
--- putI32 Motorola = B.int32BE
+-- | Lowers the high-level AST into structural TIFF headers and collects external payloads
+lowerExif :: Exif -> (RawExif, [[BS.ByteString]])
+lowerExif (Exif tiff) =
+  let (order, ExifData ifds) = case tiff of
+        IntelOrder ed -> (Intel, ed)
+        MotorolaOrder ed -> (Motorola, ed)
 
--- Constructs the binary block for an IFD & its associated extra data
-buildIFDBlock :: ByteAlign -> Word32 -> [DirEntry] -> Word32 -> B.Builder
-buildIFDBlock align startOffset entries nextOffset =
-  let sortedEntries = sortBy (comparing dirEntryTag) entries
-      count = fromIntegral (length sortedEntries) :: Word16
-      ifdSize = 2 + 12 * fromIntegral count + 4
-      extraStartOffset = startOffset + ifdSize
-      (entriesBuilder, extraBuilder, _) =
-        foldl' (buildDirEntry align extraStartOffset) (mempty, mempty, 0) sortedEntries
-   in putW16 align count <> entriesBuilder <> putW32 align nextOffset <> extraBuilder
+      initialState = LayoutState {lsOffset = 8, lsBlocks = []}
+      (rawIfds, finalState) = runState (lowerIFDChain order ifds) initialState
+      -- Reverse blocks to restore correct layout order
+      dataBlocks = [reverse (lsBlocks finalState)]
+   in (RawExif (RawTiff order (RawExifData rawIfds)), dataBlocks)
 
-buildDirEntry ::
-  ByteAlign ->
-  Word32 ->
-  (B.Builder, B.Builder, Word32) ->
-  DirEntry ->
-  (B.Builder, B.Builder, Word32)
-buildDirEntry align extraBase (eb, xb, xsz) (DirEntry tag fmt cnt dat) =
-  let datLen = fromIntegral (BS.length dat)
-      fmtCode = formatCode fmt
-   in if datLen <= 4
-        then
-          -- Left-justify <= 4 byte inline payloads via padding zeros (per spec, regardless of
-          -- endianness)
-          let paddedDat = dat <> BS.replicate (4 - BS.length dat) 0
-              entryB =
-                putW16 align tag
-                  <> putW16 align fmtCode
-                  <> putW32 align cnt
-                  <> B.byteString paddedDat
-           in (eb <> entryB, xb, xsz)
-        else
-          let offset = extraBase + xsz
-              entryB =
-                putW16 align tag
-                  <> putW16 align fmtCode
-                  <> putW32 align cnt
-                  <> putW32 align offset
-              padLen = if even datLen then 0 else 1
-              paddedExtra = B.byteString dat <> B.byteString (BS.replicate padLen 0)
-           in (eb <> entryB, xb <> paddedExtra, xsz + datLen + fromIntegral padLen)
+-- | Layouts a chain of IFDs sequentially using the State monad
+lowerIFDChain :: ByteOrder -> [IFD] -> LayoutM [RawIFD]
+lowerIFDChain _ [] = return []
+lowerIFDChain order (ifd : ifds) = do
+  let numEntries = M.size (ifdEntries ifd)
+      dirSize = 2 + 12 * fromIntegral numEntries + 4
 
--- | Internal pure builder for the TIFF structure.
-buildTiff :: ByteAlign -> ExifData -> B.Builder
-buildTiff align exif = headerBlock <> ifd0B <> exifB <> gpsB <> interopB <> ifd1B <> thumbDataB
+  -- Pre-allocate space for the directory itself
+  modify $ \st -> st {lsOffset = lsOffset st + dirSize}
+
+  -- Process all entries (external data blocks are automatically pushed to state)
+  rawAndData <- forM (M.toList $ ifdEntries ifd) $ uncurry $ processEntry order
+
+  let rawEntries = M.fromList rawAndData
+  nextIfdOffset <- if null ifds then return 0 else gets lsOffset
+  let rawIfd = RawIFD (fromIntegral numEntries) rawEntries nextIfdOffset
+
+  restIfds <- lowerIFDChain order ifds
+  return (rawIfd : restIfds)
+
+-- | Lowers a single entry
+processEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> LayoutM (Tag, RawDirectoryEntry)
+processEntry order tag val = do
+  pending <- evaluateEntry order tag val
+  rawEntry <- layoutPendingEntry order pending
+  return (tag, rawEntry)
+
+-- | Evaluates entry values, handling recursive sub-IFDs
+evaluateEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> LayoutM PendingDirectoryEntry
+evaluateEntry order tag val =
+  case val of -- Sub-IFDs are recursively compiled into a local blob and treated as external bytes
+    IFDPointer subIfd -> do
+      currentOff <- gets lsOffset
+      -- Run a localized state computation for the sub-IFD chain
+      let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
+          (rawSubIfds, finalSubState) = runState (lowerIFDChain order [subIfd]) initialState
+          subBytes = serializeChain order rawSubIfds [reverse (lsBlocks finalSubState)]
+      return $ PendingDirectoryEntry tag 4 1 subBytes
+    _ -> do
+      let (typ, count, rawBytes) = encodeValue order val
+      return $ PendingDirectoryEntry tag typ count rawBytes
+
+-- | Decides if entry bytes fit in the 4-byte pointer or require external state allocation
+layoutPendingEntry :: ByteOrder -> PendingDirectoryEntry -> LayoutM RawDirectoryEntry
+layoutPendingEntry order pe =
+  if len <= 4
+    then do
+      let valOrOff = packToWord32 order bytes
+      return $ RawDirectoryEntry (peType pe) (peCount pe) valOrOff
+    else do
+      let alignedBytes = if odd len then bytes `BS.snoc` 0 else bytes
+          payloadLen = fromIntegral (BS.length alignedBytes)
+
+      currentOff <- gets lsOffset
+      -- Update offset and prepend the block to state
+      modify $ \st ->
+        st
+          { lsOffset = lsOffset st + payloadLen,
+            lsBlocks = alignedBytes : lsBlocks st
+          }
+      return $ RawDirectoryEntry (peType pe) (peCount pe) currentOff
   where
-    enc32 w = BL.toStrict $ B.toLazyByteString $ putW32 align w
+    bytes = peData pe
+    len = BS.length bytes
 
-    headerBlock = case align of
-      Intel -> B.byteString "II\x2A\x00" <> putW32 align 8
-      Motorola -> B.byteString "MM\x00\x2A" <> putW32 align 8
+-- ---------------------------------------------------------------------------
+-- Phase 2: Binary Serialization (Pure)
 
-    -- Calculates the total block size of an IFD (directories + out-of-line padded extra data)
-    calcIFDTotalSize :: [DirEntry] -> Word32 -> Word32
-    calcIFDTotalSize baseEntries addedCount =
-      let count = fromIntegral (length baseEntries) + addedCount :: Word32
-          ifdSize = 2 + 12 * count + 4
-          extraSize =
-            sum
-              [ let l = fromIntegral (BS.length dat) :: Word32
-                 in if l <= 4 then 0 else l + (if even l then 0 else 1)
-              | DirEntry _ _ _ dat <- baseEntries
-              ]
-       in ifdSize + extraSize
+encodeRawExif :: RawExif -> [[BS.ByteString]] -> BS.ByteString
+encodeRawExif (RawExif (RawTiff order (RawExifData rawIfds))) blocks =
+  let tiffHeader = BL.toStrict $ runPut $ do
+        case order of
+          Intel -> putByteString "II"
+          Motorola -> putByteString "MM"
+        putW16 order 42
+        putW32 order 8
+   in tiffHeader <> serializeChain order rawIfds blocks
 
-    -- Purify base entries of any pre-existing pointers so we don't duplicate tags
-    ifd0BaseEntries =
-      filter
-        (\e -> dirEntryTag e `notElem` [exifOffsetTag, gpsInfoTag])
-        (ifdEntries (exifIFD0 exif))
-    exifBaseEntries =
-      maybe
-        []
-        (filter (\e -> dirEntryTag e /= interopOffsetTag) . ifdEntries)
-        (exifSubIFD exif)
-    gpsBaseEntries = maybe [] ifdEntries (exifGpsSubIFD exif)
-    interopBaseEntries = maybe [] ifdEntries (exifInteropSubIFD exif)
-    ifd1BaseEntries = case exifIFD1 exif of
-      Just ifd ->
-        filter
-          (\e -> dirEntryTag e `notElem` [0x0201, 0x0202, 0x0111, 0x0117])
-          (ifdEntries ifd)
-      Nothing -> []
+serializeChain :: ByteOrder -> [RawIFD] -> [[BS.ByteString]] -> BS.ByteString
+serializeChain order rawIfds blocks = BS.concat $ do
+  (rawIfd, ifdDataBlocks) <- zip rawIfds blocks
+  return $ putRawIFD order rawIfd <> BS.concat ifdDataBlocks
 
-    hasExif = isJust (exifSubIFD exif)
-    hasGps = isJust (exifGpsSubIFD exif)
-    hasInterop = isJust (exifInteropSubIFD exif)
-    hasThumb = isJust (exifThumbnail exif)
-    hasIFD1 = isJust (exifIFD1 exif) || hasThumb
+putRawIFD :: ByteOrder -> RawIFD -> BS.ByteString
+putRawIFD order rawIfd = BL.toStrict $ runPut $ do
+  putW16 order (rifdNumberOfEntries rawIfd)
+  forM_ (M.toList $ rifdDirectoryEntries rawIfd) $ \(tag, rde) -> do
+    putW16 order tag
+    putW16 order (rdeType rde)
+    putW32 order (rdeCount rde)
+    putW32 order (rdeOffsetOrValue rde)
+  putW32 order (rifdNextOffset rawIfd)
 
-    -- Calculate total layout footprint sequentially
-    ifd0Total = calcIFDTotalSize ifd0BaseEntries ((if hasExif then 1 else 0) + (if hasGps then 1 else 0))
-    exifTotal = if hasExif then calcIFDTotalSize exifBaseEntries (if hasInterop then 1 else 0) else 0
-    gpsTotal = if hasGps then calcIFDTotalSize gpsBaseEntries 0 else 0
-    interopTotal = if hasInterop then calcIFDTotalSize interopBaseEntries 0 else 0
-    ifd1Total = if hasIFD1 then calcIFDTotalSize ifd1BaseEntries (if hasThumb then 2 else 0) else 0
+-- ---------------------------------------------------------------------------
+-- Payload Encoding Helpers
 
-    thumbSize = case exifThumbnail exif of
-      Just (JpegThumbnail bs) -> BS.length bs
-      Just (TiffThumbnail bs) -> BS.length bs
-      Nothing -> 0
-    thumbPadLen = if even thumbSize then 0 else 1
+encodeValue :: ByteOrder -> DirectoryEntryValue -> (Word16, Word32, BS.ByteString)
+encodeValue order val = case val of
+  UnsignedByte ws -> (1, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ putWord8 ws)
+  Ascii bs -> (2, fromIntegral $ BS.length bs, bs)
+  UnsignedShort ws -> (3, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ (putW16 order) ws)
+  UnsignedLong ws -> (4, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ (putW32 order) ws)
+  UnsignedRational rs -> (5, fromIntegral $ length rs, BL.toStrict $ runPut $ mapM_ (putURational order) rs)
+  SignedByte is -> (6, fromIntegral $ length is, BL.toStrict $ runPut $ mapM_ putInt8 is)
+  Undefined bs -> (7, fromIntegral $ BS.length bs, bs)
+  SignedShort is -> (8, fromIntegral $ length is, BL.toStrict $ runPut $ mapM_ (putI16 order) is)
+  SignedLong is -> (9, fromIntegral $ length is, BL.toStrict $ runPut $ mapM_ (putI32 order) is)
+  SignedRational rs -> (10, fromIntegral $ length rs, BL.toStrict $ runPut $ mapM_ (putSRational order) rs)
+  SingleFloat fs -> (11, fromIntegral $ length fs, BL.toStrict $ runPut $ mapM_ (putFloat32 order) fs)
+  DoubleFloat ds -> (12, fromIntegral $ length ds, BL.toStrict $ runPut $ mapM_ (putFloat64 order) ds)
+  UnsignedLong8 ws -> (16, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ (putW64 order) ws)
+  SignedLong8 is -> (17, fromIntegral $ length is, BL.toStrict $ runPut $ mapM_ (putI64 order) is)
+  Unknown typ count bs -> (typ, count, bs)
+  IFDPointer _ -> error "IFDPointer is handled structurally by evaluateEntry"
 
-    -- Exact sequential byte offsets (Header is exactly 8 bytes)
-    offIFD0 = 8
-    offExif = offIFD0 + ifd0Total
-    offGps = offExif + exifTotal
-    offInterop = offGps + gpsTotal
-    offIFD1 = if hasIFD1 then offInterop + interopTotal else 0
-    offThumb = if hasThumb then offIFD1 + ifd1Total else 0
+packToWord32 :: ByteOrder -> BS.ByteString -> Word32
+packToWord32 order bytes =
+  let padded = BL.fromStrict bytes <> BL.replicate (4 - fromIntegral (BS.length bytes)) 0
+   in runGet (getW32 order) padded
 
-    -- Compile specific blocks with dynamically injected pointer tags
-    ifd0Entries =
-      ifd0BaseEntries
-        ++ [DirEntry exifOffsetTag FormatUnsignedLong 1 (enc32 offExif) | hasExif]
-        ++ [DirEntry gpsInfoTag FormatUnsignedLong 1 (enc32 offGps) | hasGps]
-    ifd0B = buildIFDBlock align offIFD0 ifd0Entries offIFD1
+-- ---------------------------------------------------------------------------
+-- Endian-Aware Putters/Getters
+getW32 :: ByteOrder -> Get Word32
+getW32 Intel = getWord32le
+getW32 Motorola = getWord32be
 
-    exifEntries =
-      exifBaseEntries
-        ++ [DirEntry interopOffsetTag FormatUnsignedLong 1 (enc32 offInterop) | hasInterop]
-    exifB = if hasExif then buildIFDBlock align offExif exifEntries 0 else mempty
+putW16 :: ByteOrder -> Word16 -> Put
+putW16 Intel = putWord16le
+putW16 Motorola = putWord16be
 
-    gpsB = if hasGps then buildIFDBlock align offGps gpsBaseEntries 0 else mempty
+putW32 :: ByteOrder -> Word32 -> Put
+putW32 Intel = putWord32le
+putW32 Motorola = putWord32be
 
-    interopB = if hasInterop then buildIFDBlock align offInterop interopBaseEntries 0 else mempty
+putW64 :: ByteOrder -> Word64 -> Put
+putW64 Intel = putWord64le
+putW64 Motorola = putWord64be
 
-    thumbEntries = case exifThumbnail exif of
-      Just (JpegThumbnail bs) ->
-        [ DirEntry 0x0201 FormatUnsignedLong 1 (enc32 offThumb),
-          DirEntry 0x0202 FormatUnsignedLong 1 (enc32 (fromIntegral $ BS.length bs))
-        ]
-      Just (TiffThumbnail bs) ->
-        [ DirEntry 0x0111 FormatUnsignedLong 1 (enc32 offThumb),
-          DirEntry 0x0117 FormatUnsignedLong 1 (enc32 (fromIntegral $ BS.length bs))
-        ]
-      Nothing -> []
+putI16 :: ByteOrder -> Int16 -> Put
+putI16 Intel = putInt16le
+putI16 Motorola = putInt16be
 
-    ifd1B = if hasIFD1 then buildIFDBlock align offIFD1 (ifd1BaseEntries ++ thumbEntries) 0 else mempty
-    thumbDataB = case exifThumbnail exif of
-      Just (JpegThumbnail bs) -> B.byteString bs <> B.byteString (BS.replicate thumbPadLen 0)
-      Just (TiffThumbnail bs) -> B.byteString bs <> B.byteString (BS.replicate thumbPadLen 0)
-      Nothing -> mempty
+putI32 :: ByteOrder -> Int32 -> Put
+putI32 Intel = putInt32le
+putI32 Motorola = putInt32be
+
+putI64 :: ByteOrder -> Int64 -> Put
+putI64 Intel = putInt64le
+putI64 Motorola = putInt64be
+
+putFloat32 :: ByteOrder -> Float -> Put
+putFloat32 Intel = putFloatle
+putFloat32 Motorola = putFloatbe
+
+putFloat64 :: ByteOrder -> Double -> Put
+putFloat64 Intel = putDoublele
+putFloat64 Motorola = putDoublebe
+
+putURational :: ByteOrder -> URational -> Put
+putURational order (URational n d) = putW32 order n >> putW32 order d
+
+putSRational :: ByteOrder -> SRational -> Put
+putSRational order (SRational n d) = putI32 order n >> putI32 order d

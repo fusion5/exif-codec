@@ -6,7 +6,7 @@ module Codec.Exif.Decode
 where
 
 import Codec.Exif.Types
-import Control.Monad (replicateM)
+import Control.Monad (replicateM, unless)
 import Data.Binary.Get
   ( Get,
     getByteString,
@@ -149,18 +149,14 @@ runGetEither getBs bs =
 -- | 1. Main decoding pipeline
 decodeRawExif :: BS.ByteString -> Either ParseError RawExif
 decodeRawExif bs = do
-  let prefix = "Exif\NUL\NUL"
-
-  if not (prefix `BS.isPrefixOf` bs)
-    then Left MissingExifPrefix
-    else do
-      -- Everything from here on is relative to the start of the TIFF header.
-      let tiffBs = BS.drop 6 bs
-      -- Read the endianness and the offset to the first IFD
-      (order, ifd0Offset) <- runGetEither parseTiffHeader tiffBs
-      -- Follow the linked list of IFDs using an empty Set for cycle detection
-      ifds <- parseIFDChain order tiffBs ifd0Offset S.empty
-      Right $ RawExif (RawTiff order (RawExifData ifds))
+  unless (exifPrefix `BS.isPrefixOf` bs) $ Left MissingExifPrefix
+  -- Everything from here on is relative to the start of the TIFF header.
+  let tiffBs = BS.drop 6 bs
+  -- Read the endianness and the offset to the first IFD
+  (order, ifd0Offset) <- runGetEither parseTiffHeader tiffBs
+  -- Follow the linked list of IFDs using an empty Set for cycle detection
+  ifds <- parseIFDChain order tiffBs ifd0Offset S.empty
+  Right $ RawExif (RawTiff order (RawExifData ifds))
 
 -- | 2. Sub-IFD Parser (Exposed for Step 2)
 parseRawIFD :: ByteOrder -> BS.ByteString -> Word32 -> Either ParseError RawIFD
@@ -171,7 +167,7 @@ parseRawIFD order tiffBs offset
 -- ---------------------------------------------------------------------------
 -- Internal Parsing Logic
 
--- | Parses the 8-byte TIFF header: ByteOrder (2), Magic 42 (2), IFD0 Offset (4)
+-- | Parses the 8-byte TIFF header: ByteOrder (2), tiff constant 42 (2), IFD0 Offset (4)
 parseTiffHeader :: Get (ByteOrder, Word32)
 parseTiffHeader = do
   endianBytes <- getByteString 2
@@ -179,9 +175,9 @@ parseTiffHeader = do
     "II" -> return Intel
     "MM" -> return Motorola
     _ -> fail $ "Invalid byte order mark: " ++ show endianBytes
-  magic <- getW16 order
-  if magic /= 42
-    then fail $ "Invalid TIFF magic number (expected 42): " ++ show magic
+  tiffConstant <- getW16 order
+  if tiffConstant /= 42
+    then fail $ "Invalid TIFF constant (expected 42): " ++ show tiffConstant
     else do
       offset <- getW32 order
       return (order, offset)

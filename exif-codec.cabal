@@ -46,6 +46,7 @@ library
   exposed-modules:
     Codec.Exif
     Codec.Exif.Encode
+    Codec.Exif.Decode
     Codec.Exif.Types
 
   build-depends:

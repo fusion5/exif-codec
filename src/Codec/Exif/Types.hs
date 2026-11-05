@@ -5,20 +5,24 @@ where
 
 import Data.ByteString qualified as BS
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.Map qualified as M
+import Data.Text ()
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
 import Prelude
 
+type Tag = Word16
+
 -- | Tag 0x8769: Offset to Exif SubIFD
-exifOffsetTag :: Word16
+exifOffsetTag :: Tag
 exifOffsetTag = 0x8769
 
 -- | Tag 0x8825: Offset to GPS SubIFD
-gpsInfoTag :: Word16
+gpsInfoTag :: Tag
 gpsInfoTag = 0x8825
 
 -- | Tag 0xA005: Offset to Interoperability SubIFD
-interopOffsetTag :: Word16
+interopOffsetTag :: Tag
 interopOffsetTag = 0xA005
 
 -- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
@@ -75,14 +79,13 @@ data SRational = SRational
 
 -- Low level directory entry
 data RawDirectoryEntry = RawDirectoryEntry
-  { -- | Determines what the entry is, e.g. original date time, flash, focal length, rotation...
-    rdeTag :: Word16,
-    -- | The data type (byte, ascii, short, long...)
+  { -- | The data type (byte, ascii, short, long...)
     rdeType :: Word16,
     -- | The number of values present
     rdeCount :: Word32,
     -- | If the value is <= 4 bytes then it's a literal, otherwise it's an offset form
     -- the beginning of the Exif data.
+    -- In the case of sub-IFDs then it's an offset to the sub-IFD, obviously.
     rdeOffsetOrValue :: Word32
   }
   deriving (Show, Eq, Generic)
@@ -116,8 +119,15 @@ data DirectoryEntryValue
   | SignedRational [SRational]
   | SingleFloat [Float]
   | DoubleFloat [Double]
-  | UnsignedLong8 [Word64]
-  | SignedLong8 [Int64]
+  | -- | technically part of the BigTIFF specification, not standard EXIF/TIFF (which limits offsets
+    -- and sizes to 32-bit).
+    UnsignedLong8 [Word64]
+  | -- | Same as above
+    SignedLong8 [Int64]
+  | -- | In the case of 'branches', meaning IFDs that are not part of the linked list
+    -- of IFDs, whose offsets are defined as directory entries such as gpsInfoTag,
+    -- we represent these sub-ifds here.
+    IFDPointer IFD
   | Unknown Word16 Word32 BS.ByteString
   deriving (Eq, Show, Generic)
 
@@ -126,7 +136,8 @@ data DirectoryEntryValue
 
 data RawIFD = RawIFD
   { rifdNumberOfEntries :: Word16,
-    rifdDirectoryEntries :: [RawDirectoryEntry],
+    -- | The key is the tag and the value is the entry value
+    rifdDirectoryEntries :: M.Map Word16 RawDirectoryEntry,
     rifdNextOffset :: Word32
   }
   deriving (Show, Eq, Generic)
@@ -134,7 +145,7 @@ data RawIFD = RawIFD
 -- | An Image File Directory (IFD) containing a list of entries and
 -- the offset pointing to the next IFD (0 if none).
 newtype IFD = IFD
-  { ifdEntries :: [DirectoryEntry]
+  { ifdEntries :: M.Map Tag DirectoryEntryValue
   }
   deriving (Eq, Show, Generic)
 

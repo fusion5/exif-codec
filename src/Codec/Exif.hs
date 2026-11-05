@@ -2,8 +2,6 @@ module Codec.Exif
   ( decodeExif,
     decodeExifRaw,
     ParseError (..),
-    Envelope (..),
-    Header (..),
     allTags,
     Codec.Exif.Encode.encodeExif,
     getExifMap,

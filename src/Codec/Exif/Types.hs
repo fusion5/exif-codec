@@ -1,13 +1,17 @@
 module Codec.Exif.Types
-  ( -- * Existing representations
+  ( -- * TIFF Header & Envelope
+    TiffHeader (..),
+    ExifHeader,
+    Header,
+    ExifEnvelope (..),
+    Envelope,
+    tiffByteAlign,
+    tiffData,
     ByteAlign (..),
-    Header (..),
-    Envelope (..),
     exifPrefix,
 
     -- * Exif AST: Core data structure
     ExifData (..),
-    TiffHeader (..),
     IFD (..),
     DirEntry (..),
     RawDirEntry (..),
@@ -41,16 +45,41 @@ import Graphics.HsExif
 import Prelude
 
 -- ---------------------------------------------------------------------------
--- Existing legacy types
+-- TIFF Header & Envelope
 
--- | Abstractly represents the "Exif\0\0" identifier
-newtype Envelope = Envelope Header
-  deriving (Show, Eq)
+-- | The TIFF header and structure, with constructors for Intel (little-endian)
+-- and Motorola (big-endian) byte order, nesting the payload (such as 'ExifData').
+data TiffHeader a
+  = IntelOrder a
+  | MotorolaOrder a
+  deriving (Eq, Show, Generic, Functor)
 
-data Header
-  = IntelOrder (Map ExifTag ExifValue)
-  | MotorolaOrder (Map ExifTag ExifValue)
-  deriving (Show, Eq)
+-- | Specialization of 'TiffHeader' nesting the 'ExifData' AST.
+type ExifHeader = TiffHeader ExifData
+
+-- | Legacy type alias for backwards compatibility with existing map-based code.
+type Header = TiffHeader (Map ExifTag ExifValue)
+
+-- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
+newtype ExifEnvelope a = Envelope
+  { envelopePayload :: a
+  }
+  deriving (Show, Eq, Generic, Functor)
+
+-- | Default Exif envelope wrapping a 'Header' for backwards compatibility.
+type Envelope = ExifEnvelope Header
+
+-- | Extract the byte alignment from a 'TiffHeader'.
+tiffByteAlign :: TiffHeader a -> ByteAlign
+tiffByteAlign = \case
+  IntelOrder _ -> Intel
+  MotorolaOrder _ -> Motorola
+
+-- | Extract the payload from a 'TiffHeader'.
+tiffData :: TiffHeader a -> a
+tiffData = \case
+  IntelOrder a -> a
+  MotorolaOrder a -> a
 
 -- | Byte alignment (endianness) of the TIFF/EXIF payload.
 data ByteAlign
@@ -79,34 +108,36 @@ interopOffsetTag :: Word16
 interopOffsetTag = 0xA005
 
 -- ---------------------------------------------------------------------------
--- TIFF Header
-
--- | The 8-byte TIFF header at the beginning of the TIFF stream.
-data TiffHeader = TiffHeader
-  { tiffByteAlign :: ByteAlign,
-    tiffMagic :: Word16,
-    tiffFirstIfdOffset :: Word32
-  }
-  deriving (Eq, Show, Generic)
-
--- ---------------------------------------------------------------------------
 -- Data Formats (TIFF 6.0 / Exif Specification Types 1-12)
 
 -- | TIFF/Exif data format (field type code).
 data ExifFormat
-  = FormatUnsignedByte -- ^ 1: 8-bit unsigned integer (BYTE)
-  | FormatAsciiString -- ^ 2: Null-terminated ASCII string (ASCII)
-  | FormatUnsignedShort -- ^ 3: 16-bit unsigned integer (SHORT)
-  | FormatUnsignedLong -- ^ 4: 32-bit unsigned integer (LONG)
-  | FormatUnsignedRational -- ^ 5: Two 32-bit unsigned integers: numerator, denominator (RATIONAL)
-  | FormatSignedByte -- ^ 6: 8-bit signed integer (SBYTE)
-  | FormatUndefined -- ^ 7: 8-bit uninterpreted byte (UNDEFINED)
-  | FormatSignedShort -- ^ 8: 16-bit signed integer (SSHORT)
-  | FormatSignedLong -- ^ 9: 32-bit signed integer (SLONG)
-  | FormatSignedRational -- ^ 10: Two 32-bit signed integers: numerator, denominator (SRATIONAL)
-  | FormatSingleFloat -- ^ 11: 32-bit IEEE float (FLOAT)
-  | FormatDoubleFloat -- ^ 12: 64-bit IEEE double float (DOUBLE)
-  | FormatUnknown Word16 -- ^ Unknown or non-standard format code
+  = -- | 1: 8-bit unsigned integer (BYTE)
+    FormatUnsignedByte
+  | -- | 2: Null-terminated ASCII string (ASCII)
+    FormatAsciiString
+  | -- | 3: 16-bit unsigned integer (SHORT)
+    FormatUnsignedShort
+  | -- | 4: 32-bit unsigned integer (LONG)
+    FormatUnsignedLong
+  | -- | 5: Two 32-bit unsigned integers: numerator, denominator (RATIONAL)
+    FormatUnsignedRational
+  | -- | 6: 8-bit signed integer (SBYTE)
+    FormatSignedByte
+  | -- | 7: 8-bit uninterpreted byte (UNDEFINED)
+    FormatUndefined
+  | -- | 8: 16-bit signed integer (SSHORT)
+    FormatSignedShort
+  | -- | 9: 32-bit signed integer (SLONG)
+    FormatSignedLong
+  | -- | 10: Two 32-bit signed integers: numerator, denominator (SRATIONAL)
+    FormatSignedRational
+  | -- | 11: 32-bit IEEE float (FLOAT)
+    FormatSingleFloat
+  | -- | 12: 64-bit IEEE double float (DOUBLE)
+    FormatDoubleFloat
+  | -- | Unknown or non-standard format code
+    FormatUnknown Word16
   deriving (Eq, Show, Generic)
 
 -- | Convert an 'ExifFormat' to its corresponding 16-bit integer code.
@@ -212,10 +243,10 @@ data RawDirEntry = RawDirEntry
 -- | An IFD directory entry holding its tag key, format, component count,
 -- and byte payload.
 data DirEntry = DirEntry
-  { entryTagKey :: Word16,
-    entryFormat :: ExifFormat,
-    entryCount :: Word32,
-    entryData :: BS.ByteString
+  { dirEntryTag :: Word16,
+    dirEntryFormat :: ExifFormat,
+    dirEntryCount :: Word32,
+    dirEntryData :: BS.ByteString
   }
   deriving (Eq, Show, Generic)
 
@@ -243,12 +274,11 @@ data Thumbnail
 -- Exif Abstract Syntax Tree
 
 -- | The Exif data structure (AST), reflecting the layout described in the Exif specification:
--- TIFF header endianness, primary IFD0 (main image), optional Exif SubIFD (camera settings),
+-- primary IFD0 (main image), optional Exif SubIFD (camera settings),
 -- optional GPS SubIFD, optional Interoperability SubIFD, optional IFD1 (thumbnail directory),
--- and optional thumbnail image.
+-- and optional thumbnail image. Byte alignment is determined by the enclosing 'TiffHeader'.
 data ExifData = ExifData
-  { exifByteAlign :: ByteAlign,
-    exifIFD0 :: IFD,
+  { exifIFD0 :: IFD,
     exifSubIFD :: Maybe IFD,
     exifGpsSubIFD :: Maybe IFD,
     exifInteropSubIFD :: Maybe IFD,

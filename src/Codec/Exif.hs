@@ -14,8 +14,7 @@ where
 
 import Codec.Exif.Decode (ParseError (..), allTags, decodeExif, decodeExifRaw)
 import Codec.Exif.Encode (encodeExif)
-import Codec.Exif.Types
-import Codec.Exif.Types as Exports (Envelope (..), Header (..))
+import Codec.Exif.Types as Exports
 import Data.Map (Map)
 import Graphics.HsExif hiding (parseExif, parseFileExif)
 

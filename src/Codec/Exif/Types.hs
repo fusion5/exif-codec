@@ -22,8 +22,13 @@ interopOffsetTag :: Word16
 interopOffsetTag = 0xA005
 
 -- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
-newtype Exif = Envelope
-  { envelopePayload :: Tiff
+newtype Exif = Exif
+  { exifPayload :: Tiff
+  }
+  deriving (Show, Eq, Generic)
+
+newtype RawExif = RawExif
+  { rePayload :: RawTiff
   }
   deriving (Show, Eq, Generic)
 
@@ -38,6 +43,7 @@ data RawTiff = RawTiff
   { rtHeader :: ByteOrder,
     rtExifData :: RawExifData
   }
+  deriving (Show, Eq, Generic)
 
 -- | Byte order (endianness) of the TIFF/EXIF payload.
 data ByteOrder
@@ -79,6 +85,7 @@ data RawDirectoryEntry = RawDirectoryEntry
     -- the beginning of the Exif data.
     rdeOffsetOrValue :: Word32
   }
+  deriving (Show, Eq, Generic)
 
 -- | High-level typed representation of an Exif entry's payload values.
 data DirectoryEntry = DirectoryEntry
@@ -122,6 +129,7 @@ data RawIFD = RawIFD
     rifdDirectoryEntries :: [RawDirectoryEntry],
     rifdNextOffset :: Word32
   }
+  deriving (Show, Eq, Generic)
 
 -- | An Image File Directory (IFD) containing a list of entries and
 -- the offset pointing to the next IFD (0 if none).
@@ -145,6 +153,7 @@ data Thumbnail
 newtype RawExifData = RawExifData
   { rawIFDs :: [RawIFD]
   }
+  deriving (Show, Eq, Generic)
 
 -- | The Exif data structure (AST), reflecting the layout described in the Exif specification:
 -- primary IFD0 (main image), optional Exif SubIFD (camera settings),

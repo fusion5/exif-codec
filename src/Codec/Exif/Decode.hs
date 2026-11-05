@@ -7,22 +7,37 @@ where
 
 import Codec.Exif.Types
 import Control.Monad (replicateM)
-import Data.Bifunctor
-import Data.Binary.Get
 import Data.Binary.Get
   ( Get,
     getByteString,
+    getDoublebe,
+    getDoublele,
+    getFloatbe,
+    getFloatle,
+    getInt16be,
+    getInt16le,
+    getInt32be,
+    getInt32le,
+    getInt64be,
+    getInt64le,
+    getInt8,
     getWord16be,
     getWord16le,
     getWord32be,
     getWord32le,
+    getWord64be,
+    getWord64le,
+    getWord8,
     runGetOrFail,
   )
+import Data.Binary.Put (putWord32be, putWord32le, runPut)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BL
+import Data.Functor ((<&>))
+import Data.Int (Int16, Int32, Int64)
 import Data.Map qualified as M
 import Data.Set qualified as S
-import Data.Word (Word16, Word32)
+import Data.Word (Word16, Word32, Word64)
 import Prelude
 
 data ParseError
@@ -32,11 +47,96 @@ data ParseError
   | IFDChainCycle
   deriving (Show, Eq)
 
-decodeExif :: BS.ByteString -> Exif
-decodeExif = error "TODO"
+-- | Decodes raw EXIF bytestring into the high-level generic AST
+decodeExif :: BS.ByteString -> Either ParseError Exif
+decodeExif bs = decodeRawExif bs <&> Exif . convertRawTiff (BS.drop 6 bs) . rePayload
 
-decodeExifRaw :: BS.ByteString -> Tiff
-decodeExifRaw = error "TODO"
+-- | Decodes just the structural Tiff block
+decodeExifRaw :: BS.ByteString -> Either ParseError Tiff
+decodeExifRaw bs = decodeRawExif bs <&> convertRawTiff (BS.drop 6 bs) . rePayload
+
+-- ---------------------------------------------------------------------------
+-- Conversion: Raw AST -> High-Level AST
+
+convertRawTiff :: BS.ByteString -> RawTiff -> Tiff
+convertRawTiff tiffBs (RawTiff order (RawExifData rawIfds)) =
+  let ifds = map (convertRawIFD order tiffBs) rawIfds
+      exifData = ExifData ifds
+   in case order of
+        Intel -> IntelOrder exifData
+        Motorola -> MotorolaOrder exifData
+
+convertRawIFD :: ByteOrder -> BS.ByteString -> RawIFD -> IFD
+convertRawIFD order tiffBs rawIFD =
+  IFD $ M.mapWithKey (convertEntry order tiffBs) (rifdDirectoryEntries rawIFD)
+
+convertEntry :: ByteOrder -> BS.ByteString -> Tag -> RawDirectoryEntry -> DirectoryEntryValue
+convertEntry order tiffBs tag rde
+  | isIFDPointerTag tag =
+      let offset = rdeOffsetOrValue rde
+       in case parseIFDChain order tiffBs offset S.empty of
+            Right (subRawIfd : _) -> IFDPointer (convertRawIFD order tiffBs subRawIfd)
+            _ -> Unknown (rdeType rde) (rdeCount rde) BS.empty
+  | otherwise =
+      let typ = rdeType rde
+          cnt = rdeCount rde
+          typeSize = getTypeSize typ
+          totalSize = cnt * typeSize
+
+          -- Per TIFF specification, if total payload size is <= 4 bytes,
+          -- it resides in the offset field padded to 4 bytes.
+          bytes =
+            if totalSize <= 4
+              then BS.take (fromIntegral totalSize) (word32ToBytes order (rdeOffsetOrValue rde))
+              else BS.take (fromIntegral totalSize) (BS.drop (fromIntegral (rdeOffsetOrValue rde)) tiffBs)
+       in case runGetEither (getValues order typ cnt) bytes of
+            Right val -> val
+            Left _ -> Unknown typ cnt bytes
+
+isIFDPointerTag :: Tag -> Bool
+isIFDPointerTag tag = tag `elem` [exifOffsetTag, gpsInfoTag, interopOffsetTag]
+
+-- | Maps standard EXIF Directory Entry Types to byte counts
+getTypeSize :: Word16 -> Word32
+getTypeSize 1 = 1 -- BYTE
+getTypeSize 2 = 1 -- ASCII
+getTypeSize 3 = 2 -- SHORT
+getTypeSize 4 = 4 -- LONG
+getTypeSize 5 = 8 -- RATIONAL
+getTypeSize 6 = 1 -- SBYTE
+getTypeSize 7 = 1 -- UNDEFINED
+getTypeSize 8 = 2 -- SSHORT
+getTypeSize 9 = 4 -- SLONG
+getTypeSize 10 = 8 -- SRATIONAL
+getTypeSize 11 = 4 -- FLOAT
+getTypeSize 12 = 8 -- DOUBLE
+getTypeSize 16 = 8 -- LONG8 (BigTIFF)
+getTypeSize 17 = 8 -- SLONG8 (BigTIFF)
+getTypeSize _ = 1 -- Default/Unknown Fallback
+
+-- | Extracts the proper Typed array using binary primitives
+getValues :: ByteOrder -> Word16 -> Word32 -> Get DirectoryEntryValue
+getValues order typ count = do
+  let n = fromIntegral count
+  case typ of
+    1 -> UnsignedByte <$> replicateM n getWord8
+    2 -> Ascii <$> getByteString n
+    3 -> UnsignedShort <$> replicateM n (getW16 order)
+    4 -> UnsignedLong <$> replicateM n (getW32 order)
+    5 -> UnsignedRational <$> replicateM n (getURational order)
+    6 -> SignedByte <$> replicateM n getInt8
+    7 -> Undefined <$> getByteString n
+    8 -> SignedShort <$> replicateM n (getI16 order)
+    9 -> SignedLong <$> replicateM n (getI32 order)
+    10 -> SignedRational <$> replicateM n (getSRational order)
+    11 -> SingleFloat <$> replicateM n (getFloat32 order)
+    12 -> DoubleFloat <$> replicateM n (getFloat64 order)
+    16 -> UnsignedLong8 <$> replicateM n (getW64 order)
+    17 -> SignedLong8 <$> replicateM n (getI64 order)
+    _ -> fail $ "Unknown EXIF type: " ++ show typ
+
+-- ---------------------------------------------------------------------------
+-- Decoding Raw Pipelines
 
 -- | Helper to bridge strict ByteStrings to binary's lazy Get runner,
 -- mapping the 3-tuple error/success into a clean Either.
@@ -74,7 +174,6 @@ parseRawIFD order tiffBs offset
 -- | Parses the 8-byte TIFF header: ByteOrder (2), Magic 42 (2), IFD0 Offset (4)
 parseTiffHeader :: Get (ByteOrder, Word32)
 parseTiffHeader = do
-  -- Note: getByteString returns a strict ByteString, matching our literal
   endianBytes <- getByteString 2
   order <- case endianBytes of
     "II" -> return Intel
@@ -95,7 +194,6 @@ parseIFDChain order tiffBs offset seen
   | S.member offset seen = Left IFDChainCycle
   | otherwise = do
       ifd <- parseRawIFD order tiffBs offset
-      -- Insert current offset and recurse
       rest <- parseIFDChain order tiffBs (rifdNextOffset ifd) (S.insert offset seen)
       return (ifd : rest)
 
@@ -103,12 +201,8 @@ parseIFDChain order tiffBs offset seen
 getIFD :: ByteOrder -> Get RawIFD
 getIFD order = do
   numEntries <- getW16 order
-
-  -- Each directory entry is exactly 12 bytes.
   entries <- replicateM (fromIntegral numEntries) (getEntry order)
-
   nextOffset <- getW32 order
-
   return
     RawIFD
       { rifdNumberOfEntries = numEntries,
@@ -126,7 +220,12 @@ getEntry order = do
   return (tag, RawDirectoryEntry typ count offsetOrVal)
 
 -- ---------------------------------------------------------------------------
--- Endianness Helpers
+-- Endianness / Decoding Helpers
+
+-- Helper: Re-serializes the Word32 representing literal values <= 4 bytes properly
+word32ToBytes :: ByteOrder -> Word32 -> BS.ByteString
+word32ToBytes Intel w = BL.toStrict $ runPut $ putWord32le w
+word32ToBytes Motorola w = BL.toStrict $ runPut $ putWord32be w
 
 getW16 :: ByteOrder -> Get Word16
 getW16 Intel = getWord16le
@@ -135,3 +234,33 @@ getW16 Motorola = getWord16be
 getW32 :: ByteOrder -> Get Word32
 getW32 Intel = getWord32le
 getW32 Motorola = getWord32be
+
+getW64 :: ByteOrder -> Get Word64
+getW64 Intel = getWord64le
+getW64 Motorola = getWord64be
+
+getI16 :: ByteOrder -> Get Int16
+getI16 Intel = getInt16le
+getI16 Motorola = getInt16be
+
+getI32 :: ByteOrder -> Get Int32
+getI32 Intel = getInt32le
+getI32 Motorola = getInt32be
+
+getI64 :: ByteOrder -> Get Int64
+getI64 Intel = getInt64le
+getI64 Motorola = getInt64be
+
+getFloat32 :: ByteOrder -> Get Float
+getFloat32 Intel = getFloatle
+getFloat32 Motorola = getFloatbe
+
+getFloat64 :: ByteOrder -> Get Double
+getFloat64 Intel = getDoublele
+getFloat64 Motorola = getDoublebe
+
+getURational :: ByteOrder -> Get URational
+getURational order = URational <$> getW32 order <*> getW32 order
+
+getSRational :: ByteOrder -> Get SRational
+getSRational order = SRational <$> getI32 order <*> getI32 order

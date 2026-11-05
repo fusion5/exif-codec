@@ -170,12 +170,8 @@ newtype RawExifData = RawExifData
 -- primary IFD0 (main image), optional Exif SubIFD (camera settings),
 -- optional GPS SubIFD, optional Interoperability SubIFD, optional IFD1 (thumbnail directory),
 -- and optional thumbnail image. Byte alignment is determined by the enclosing 'TiffHeader'.
-data ExifData = ExifData
-  { exifIFD0 :: IFD,
-    exifSubIFD :: Maybe IFD,
-    exifGpsSubIFD :: Maybe IFD,
-    exifInteropSubIFD :: Maybe IFD,
-    exifIFD1 :: Maybe IFD,
-    exifThumbnail :: Maybe Thumbnail
+newtype ExifData = ExifData
+  { -- | Main Chain of IFDs, no branches. Branches are in the IFDPointer DirectoryEntryValue.
+    exifIFD :: [IFD]
   }
   deriving (Eq, Show, Generic)

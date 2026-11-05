@@ -187,6 +187,7 @@ parseTiffHeader = do
 parseIFDChain :: ByteOrder -> BS.ByteString -> Word32 -> S.Set Word32 -> Either ParseError [RawIFD]
 parseIFDChain _ _ 0 _ = Right []
 parseIFDChain order tiffBs offset seen
+  | fromIntegral offset >= BS.length tiffBs = Right []
   | S.member offset seen = Left IFDChainCycle
   | otherwise = do
       ifd <- parseRawIFD order tiffBs offset

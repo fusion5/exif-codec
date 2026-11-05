@@ -43,30 +43,34 @@ lowerExif (Exif tiff) =
         MotorolaOrder ed -> (Motorola, ed)
 
       initialState = LayoutState {lsOffset = 8, lsBlocks = []}
-      (rawIfds, finalState) = runState (lowerIFDChain order ifds) initialState
-      -- Reverse blocks to restore correct layout order
-      dataBlocks = [reverse (lsBlocks finalState)]
+      (ifdPairs, _) = runState (lowerIFDChain order ifds) initialState
+      rawIfds = map fst ifdPairs
+      dataBlocks = map snd ifdPairs
    in (RawExif (RawTiff order (RawExifData rawIfds)), dataBlocks)
 
 -- | Layouts a chain of IFDs sequentially using the State monad
-lowerIFDChain :: ByteOrder -> [IFD] -> LayoutM [RawIFD]
+lowerIFDChain :: ByteOrder -> [IFD] -> LayoutM [(RawIFD, [BS.ByteString])]
 lowerIFDChain _ [] = return []
 lowerIFDChain order (ifd : ifds) = do
   let numEntries = M.size (ifdEntries ifd)
       dirSize = 2 + 12 * fromIntegral numEntries + 4
 
-  -- Pre-allocate space for the directory itself
-  modify $ \st -> st {lsOffset = lsOffset st + dirSize}
+  -- Pre-allocate space for the directory and reset block buffer for this IFD
+  modify $ \st -> st {lsOffset = lsOffset st + dirSize, lsBlocks = []}
 
-  -- Process all entries (external data blocks are automatically pushed to state)
   rawAndData <- forM (M.toList $ ifdEntries ifd) $ uncurry $ processEntry order
+
+  -- Capture data blocks allocated specifically for this IFD
+  stAfter <- get
+  let ifdBlocks = reverse (lsBlocks stAfter)
+  modify $ \st -> st {lsBlocks = []}
 
   let rawEntries = M.fromList rawAndData
   nextIfdOffset <- if null ifds then return 0 else gets lsOffset
   let rawIfd = RawIFD (fromIntegral numEntries) rawEntries nextIfdOffset
 
-  restIfds <- lowerIFDChain order ifds
-  return (rawIfd : restIfds)
+  rest <- lowerIFDChain order ifds
+  return ((rawIfd, ifdBlocks) : rest)
 
 -- | Lowers a single entry
 processEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> LayoutM (Tag, RawDirectoryEntry)
@@ -76,15 +80,18 @@ processEntry order tag val = do
   return (tag, rawEntry)
 
 -- | Evaluates entry values, handling recursive sub-IFDs
+-- | Evaluates entry values, handling recursive sub-IFDs
 evaluateEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> LayoutM PendingDirectoryEntry
 evaluateEntry order tag val =
-  case val of -- Sub-IFDs are recursively compiled into a local blob and treated as external bytes
+  case val of
     IFDPointer subIfd -> do
       currentOff <- gets lsOffset
-      -- Run a localized state computation for the sub-IFD chain
       let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
-          (rawSubIfds, finalSubState) = runState (lowerIFDChain order [subIfd]) initialState
-          subBytes = serializeChain order rawSubIfds [reverse (lsBlocks finalSubState)]
+          (ifdPairs, finalSubState) = runState (lowerIFDChain order [subIfd]) initialState
+          -- Unpack raw IFDs and their respective data blocks for the sub-IFD
+          subRawIfds = map fst ifdPairs
+          subBlocks = map snd ifdPairs ++ [reverse (lsBlocks finalSubState)]
+          subBytes = serializeChain order subRawIfds subBlocks
       return $ PendingDirectoryEntry tag 4 1 subBytes
     _ -> do
       let (typ, count, rawBytes) = encodeValue order val

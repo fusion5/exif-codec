@@ -130,7 +130,7 @@ main = do
                       ( ExifData
                           { exifIFD =
                               [ IFD
-                                  { ifdEntries = M.fromList [(270, Ascii "hello world\NUL")]
+                                  { ifdEntries = M.fromList [(270, ASCII "hello world\NUL")]
                                   }
                               ]
                           }

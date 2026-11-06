@@ -108,7 +108,7 @@ data PendingDirectoryEntry = PendingDirectoryEntry
 
 data DirectoryEntryValue
   = UnsignedByte [Word8]
-  | Ascii BS.ByteString
+  | ASCII BS.ByteString
   | UnsignedShort [Word16]
   | UnsignedLong [Word32]
   | UnsignedRational [URational]
@@ -142,8 +142,7 @@ data RawIFD = RawIFD
   }
   deriving (Show, Eq, Generic)
 
--- | An Image File Directory (IFD) containing a list of entries and
--- the offset pointing to the next IFD (0 if none).
+-- | An Image File Directory (IFD) containing a list of entries
 newtype IFD = IFD
   { ifdEntries :: M.Map Tag DirectoryEntryValue
   }

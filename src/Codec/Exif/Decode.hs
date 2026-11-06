@@ -120,7 +120,7 @@ getValues order typ count = do
   let n = fromIntegral count
   case typ of
     1 -> UnsignedByte <$> replicateM n getWord8
-    2 -> Ascii <$> getByteString n
+    2 -> ASCII <$> getByteString n
     3 -> UnsignedShort <$> replicateM n (getW16 order)
     4 -> UnsignedLong <$> replicateM n (getW32 order)
     5 -> UnsignedRational <$> replicateM n (getURational order)

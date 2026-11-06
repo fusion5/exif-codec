@@ -154,7 +154,7 @@ putRawIFD order rawIfd = BL.toStrict $ runPut $ do
 encodeValue :: ByteOrder -> DirectoryEntryValue -> (Word16, Word32, BS.ByteString)
 encodeValue order val = case val of
   UnsignedByte ws -> (1, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ putWord8 ws)
-  Ascii bs -> (2, fromIntegral $ BS.length bs, bs)
+  ASCII bs -> (2, fromIntegral $ BS.length bs, bs)
   UnsignedShort ws -> (3, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ (putW16 order) ws)
   UnsignedLong ws -> (4, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ (putW32 order) ws)
   UnsignedRational rs -> (5, fromIntegral $ length rs, BL.toStrict $ runPut $ mapM_ (putURational order) rs)

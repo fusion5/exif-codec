@@ -31,8 +31,8 @@ pointerTags = [exifOffsetTag, gpsInfoTag, interopOffsetTag]
 
 instance Arbitrary IFD where
   arbitrary = sized $ \n -> do
-    -- Generate a small number of entries per IFD
-    numEntries <- choose (0, max 0 (n `min` 5))
+    -- Generate at most 5 entries per IFD
+    numEntries <- choose (0, min 5 n)
     normalTags <- vectorOf numEntries (arbitrary `suchThat` (`notElem` pointerTags))
     normalVals <- replicateM numEntries arbitrary
     let normalEntries = M.fromList (zip normalTags normalVals)
@@ -49,7 +49,7 @@ instance Arbitrary DirectoryEntryValue where
   arbitrary =
     oneof
       [ UnsignedByte <$> arbitrary,
-        Ascii . BS.pack <$> arbitrary,
+        ASCII . BS.pack <$> arbitrary,
         UnsignedShort <$> arbitrary,
         UnsignedLong <$> arbitrary,
         UnsignedRational <$> arbitrary,

@@ -124,10 +124,6 @@ data DirectoryEntryValue
     UnsignedLong8 [Word64]
   | -- | Same as above
     SignedLong8 [Int64]
-  | -- | In the case of 'branches', meaning IFDs that are not part of the linked list
-    -- of IFDs, whose offsets are defined as directory entries such as gpsInfoTag,
-    -- we represent these sub-ifds here.
-    IFDPointer IFD
   | Unknown Word16 Word32 BS.ByteString
   deriving (Eq, Show, Generic)
 
@@ -142,9 +138,34 @@ data RawIFD = RawIFD
   }
   deriving (Show, Eq, Generic)
 
--- | An Image File Directory (IFD) containing a list of entries
+-- | Leaf directories that cannot branch to any sub-IFDs
 newtype IFD = IFD
   { ifdEntries :: M.Map Tag DirectoryEntryValue
+  }
+  deriving (Eq, Show, Generic)
+
+newtype GPSIFD = GPSIFD
+  { gpsEntries :: M.Map Tag DirectoryEntryValue
+  }
+  deriving (Eq, Show, Generic)
+
+newtype InteropIFD = InteropIFD
+  { interopEntries :: M.Map Tag DirectoryEntryValue
+  }
+  deriving (Eq, Show, Generic)
+
+-- | Exif SubIFD: contains camera settings and can ONLY branch to Interop
+data ExifSubIFD = ExifSubIFD
+  { exifEntries :: M.Map Tag DirectoryEntryValue,
+    exifInterop :: Maybe InteropIFD
+  }
+  deriving (Eq, Show, Generic)
+
+-- | IFD0: primary image directory; can branch to ExifSubIFD and GPSIFD
+data IFD0 = IFD0
+  { ifd0Entries :: M.Map Tag DirectoryEntryValue,
+    ifd0Exif :: Maybe ExifSubIFD,
+    ifd0GPS :: Maybe GPSIFD
   }
   deriving (Eq, Show, Generic)
 
@@ -167,10 +188,9 @@ newtype RawExifData = RawExifData
 
 -- | The Exif data structure (AST), reflecting the layout described in the Exif specification:
 -- primary IFD0 (main image), optional Exif SubIFD (camera settings),
--- optional GPS SubIFD, optional Interoperability SubIFD, optional IFD1 (thumbnail directory),
--- and optional thumbnail image. Byte alignment is determined by the enclosing 'TiffHeader'.
-newtype ExifData = ExifData
-  { -- | Main Chain of IFDs, no branches. Branches are in the IFDPointer DirectoryEntryValue.
-    exifIFD :: [IFD]
+-- optional GPS SubIFD, optional Interoperability SubIFD, and optional chained IFDs (IFD1, etc.).
+data ExifData = ExifData
+  { exifIFD0 :: IFD0,
+    exifChainedIFDs :: [IFD]
   }
   deriving (Eq, Show, Generic)

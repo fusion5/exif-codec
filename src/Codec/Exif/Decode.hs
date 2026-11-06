@@ -60,41 +60,73 @@ decodeExifRaw bs = decodeRawExif bs <&> convertRawTiff (BS.drop 6 bs) . rePayloa
 
 convertRawTiff :: BS.ByteString -> RawTiff -> Tiff
 convertRawTiff tiffBs (RawTiff order (RawExifData rawIfds)) =
-  let ifds = map (convertRawIFD order tiffBs) rawIfds
-      exifData = ExifData ifds
+  let exifData = case rawIfds of
+        [] -> ExifData (IFD0 M.empty Nothing Nothing) []
+        (raw0 : rest) ->
+          let ifd0 = convertRawIFD0 order tiffBs raw0
+              chained = map (convertRawIFD order tiffBs) rest
+           in ExifData ifd0 chained
    in case order of
         Intel -> IntelOrder exifData
         Motorola -> MotorolaOrder exifData
+
+convertRawIFD0 :: ByteOrder -> BS.ByteString -> RawIFD -> IFD0
+convertRawIFD0 order tiffBs rawIFD =
+  let allEntries = rifdDirectoryEntries rawIFD
+      mExif = case M.lookup exifOffsetTag allEntries of
+        Just rde -> case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
+          Right (subRaw : _) -> Just (convertRawExifSubIFD order tiffBs subRaw)
+          _ -> Nothing
+        Nothing -> Nothing
+      mGps = case M.lookup gpsInfoTag allEntries of
+        Just rde -> case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
+          Right (subRaw : _) -> Just (convertRawGPSIFD order tiffBs subRaw)
+          _ -> Nothing
+        Nothing -> Nothing
+      cleanEntries = M.filterWithKey (\k _ -> k /= exifOffsetTag && k /= gpsInfoTag) allEntries
+      entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
+   in IFD0 entries mExif mGps
+
+convertRawExifSubIFD :: ByteOrder -> BS.ByteString -> RawIFD -> ExifSubIFD
+convertRawExifSubIFD order tiffBs rawIFD =
+  let allEntries = rifdDirectoryEntries rawIFD
+      mInterop = case M.lookup interopOffsetTag allEntries of
+        Just rde -> case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
+          Right (subRaw : _) -> Just (convertRawInteropIFD order tiffBs subRaw)
+          _ -> Nothing
+        Nothing -> Nothing
+      cleanEntries = M.filterWithKey (\k _ -> k /= interopOffsetTag) allEntries
+      entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
+   in ExifSubIFD entries mInterop
+
+convertRawGPSIFD :: ByteOrder -> BS.ByteString -> RawIFD -> GPSIFD
+convertRawGPSIFD order tiffBs rawIFD =
+  GPSIFD $ M.mapWithKey (convertEntry order tiffBs) (rifdDirectoryEntries rawIFD)
+
+convertRawInteropIFD :: ByteOrder -> BS.ByteString -> RawIFD -> InteropIFD
+convertRawInteropIFD order tiffBs rawIFD =
+  InteropIFD $ M.mapWithKey (convertEntry order tiffBs) (rifdDirectoryEntries rawIFD)
 
 convertRawIFD :: ByteOrder -> BS.ByteString -> RawIFD -> IFD
 convertRawIFD order tiffBs rawIFD =
   IFD $ M.mapWithKey (convertEntry order tiffBs) (rifdDirectoryEntries rawIFD)
 
 convertEntry :: ByteOrder -> BS.ByteString -> Tag -> RawDirectoryEntry -> DirectoryEntryValue
-convertEntry order tiffBs tag rde
-  | isIFDPointerTag tag =
-      let offset = rdeOffsetOrValue rde
-       in case parseIFDChain order tiffBs offset S.empty of
-            Right (subRawIfd : _) -> IFDPointer (convertRawIFD order tiffBs subRawIfd)
-            _ -> Unknown (rdeType rde) (rdeCount rde) BS.empty
-  | otherwise =
-      let typ = rdeType rde
-          cnt = rdeCount rde
-          typeSize = getTypeSize typ
-          totalSize = cnt * typeSize
+convertEntry order tiffBs _tag rde =
+  let typ = rdeType rde
+      cnt = rdeCount rde
+      typeSize = getTypeSize typ
+      totalSize = cnt * typeSize
 
-          -- Per TIFF specification, if total payload size is <= 4 bytes,
-          -- it resides in the offset field padded to 4 bytes.
-          bytes =
-            if totalSize <= 4
-              then BS.take (fromIntegral totalSize) (word32ToBytes order (rdeOffsetOrValue rde))
-              else BS.take (fromIntegral totalSize) (BS.drop (fromIntegral (rdeOffsetOrValue rde)) tiffBs)
-       in case runGetEither (getValues order typ cnt) bytes of
-            Right val -> val
-            Left _ -> Unknown typ cnt bytes
-
-isIFDPointerTag :: Tag -> Bool
-isIFDPointerTag tag = tag `elem` [exifOffsetTag, gpsInfoTag, interopOffsetTag]
+      -- Per TIFF specification, if total payload size is <= 4 bytes,
+      -- it resides in the offset field padded to 4 bytes.
+      bytes =
+        if totalSize <= 4
+          then BS.take (fromIntegral totalSize) (word32ToBytes order (rdeOffsetOrValue rde))
+          else BS.take (fromIntegral totalSize) (BS.drop (fromIntegral (rdeOffsetOrValue rde)) tiffBs)
+   in case runGetEither (getValues order typ cnt) bytes of
+        Right val -> val
+        Left _ -> Unknown typ cnt bytes
 
 -- | Maps standard EXIF Directory Entry Types to byte counts
 getTypeSize :: Word16 -> Word32

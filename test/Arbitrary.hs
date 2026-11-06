@@ -1,7 +1,7 @@
 module Arbitrary () where
 
 import Codec.Exif.Types
-import Control.Monad (forM, replicateM)
+import Control.Monad (replicateM)
 import Data.ByteString qualified as BS
 import Data.Map qualified as M
 import Test.QuickCheck
@@ -21,29 +21,56 @@ instance Arbitrary ByteOrder where
 
 instance Arbitrary ExifData where
   arbitrary = sized $ \n -> do
-    -- Generate a sensible chain length for IFDs (e.g., 1 to 3 IFDs)
-    k <- choose (1, max 1 (n `min` 3))
-    ifds <- scale (`div` 2) (replicateM k arbitrary)
-    return $ ExifData ifds
+    ifd0 <- arbitrary
+    numChained <- choose (0, max 0 (n `min` 2))
+    chained <- scale (`div` 2) (replicateM numChained arbitrary)
+    return $ ExifData ifd0 chained
 
-pointerTags :: [Tag]
-pointerTags = [exifOffsetTag, gpsInfoTag, interopOffsetTag]
+instance Arbitrary IFD0 where
+  arbitrary = sized $ \n -> do
+    numEntries <- choose (0, min 5 n)
+    tags <- vectorOf numEntries (arbitrary `suchThat` (`notElem` [exifOffsetTag, gpsInfoTag]))
+    vals <- replicateM numEntries arbitrary
+    let entries = M.fromList (zip tags vals)
+    if n <= 0
+      then return $ IFD0 entries Nothing Nothing
+      else do
+        mExif <- arbitrary
+        mGps <- arbitrary
+        return $ IFD0 entries mExif mGps
+
+instance Arbitrary ExifSubIFD where
+  arbitrary = sized $ \n -> do
+    numEntries <- choose (0, min 5 n)
+    tags <- vectorOf numEntries (arbitrary `suchThat` (/= interopOffsetTag))
+    vals <- replicateM numEntries arbitrary
+    let entries = M.fromList (zip tags vals)
+    if n <= 0
+      then return $ ExifSubIFD entries Nothing
+      else do
+        mInterop <- arbitrary
+        return $ ExifSubIFD entries mInterop
+
+instance Arbitrary GPSIFD where
+  arbitrary = sized $ \n -> do
+    numEntries <- choose (0, min 5 n)
+    tags <- replicateM numEntries arbitrary
+    vals <- replicateM numEntries arbitrary
+    return $ GPSIFD (M.fromList (zip tags vals))
+
+instance Arbitrary InteropIFD where
+  arbitrary = sized $ \n -> do
+    numEntries <- choose (0, min 5 n)
+    tags <- replicateM numEntries arbitrary
+    vals <- replicateM numEntries arbitrary
+    return $ InteropIFD (M.fromList (zip tags vals))
 
 instance Arbitrary IFD where
   arbitrary = sized $ \n -> do
-    -- Generate at most 5 entries per IFD
     numEntries <- choose (0, min 5 n)
-    normalTags <- vectorOf numEntries (arbitrary `suchThat` (`notElem` pointerTags))
-    normalVals <- replicateM numEntries arbitrary
-    let normalEntries = M.fromList (zip normalTags normalVals)
-    if n <= 0
-      then return $ IFD normalEntries
-      else do
-        pointers <- sublistOf pointerTags
-        pointerEntries <- forM pointers $ \ptag -> do
-          subIfd <- scale (`div` 2) arbitrary
-          return (ptag, IFDPointer subIfd)
-        return $ IFD (M.union (M.fromList pointerEntries) normalEntries)
+    tags <- replicateM numEntries arbitrary
+    vals <- replicateM numEntries arbitrary
+    return $ IFD (M.fromList (zip tags vals))
 
 instance Arbitrary DirectoryEntryValue where
   arbitrary =

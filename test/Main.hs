@@ -128,11 +128,13 @@ main = do
                 { exifPayload =
                     IntelOrder
                       ( ExifData
-                          { exifIFD =
-                              [ IFD
-                                  { ifdEntries = M.fromList [(270, ASCII "hello world\NUL")]
-                                  }
-                              ]
+                          { exifIFD0 =
+                              IFD0
+                                { ifd0Entries = M.fromList [(270, ASCII "hello world\NUL")],
+                                  ifd0Exif = Nothing,
+                                  ifd0GPS = Nothing
+                                },
+                            exifChainedIFDs = []
                           }
                       )
                 }

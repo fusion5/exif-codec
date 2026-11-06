@@ -14,6 +14,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BL
 import Data.Int
 import Data.Map qualified as M
+import Data.Maybe (isJust)
 import Data.Word
 import Prelude
 
@@ -38,15 +39,119 @@ type LayoutM = State LayoutState
 -- | Lowers the high-level AST into structural TIFF headers and collects external payloads
 lowerExif :: Exif -> (RawExif, [[BS.ByteString]])
 lowerExif (Exif tiff) =
-  let (order, ExifData ifds) = case tiff of
+  let (order, ExifData ifd0 chained) = case tiff of
         IntelOrder ed -> (Intel, ed)
         MotorolaOrder ed -> (Motorola, ed)
 
       initialState = LayoutState {lsOffset = 8, lsBlocks = []}
-      (ifdPairs, _) = runState (lowerIFDChain order ifds) initialState
-      rawIfds = map fst ifdPairs
-      dataBlocks = map snd ifdPairs
+      ((raw0, blocks0, rawChained), _) = runState (lowerAll order ifd0 chained) initialState
+      rawIfds = raw0 : map fst rawChained
+      dataBlocks = blocks0 : map snd rawChained
    in (RawExif (RawTiff order (RawExifData rawIfds)), dataBlocks)
+
+lowerAll :: ByteOrder -> IFD0 -> [IFD] -> LayoutM (RawIFD, [BS.ByteString], [(RawIFD, [BS.ByteString])])
+lowerAll order ifd0 chained = do
+  (raw0WithoutNext, blocks0) <- lowerIFD0 order ifd0
+  if null chained
+    then return (raw0WithoutNext 0, blocks0, [])
+    else do
+      ifd1Offset <- gets lsOffset
+      chainedPairs <- lowerIFDChain order chained
+      return (raw0WithoutNext ifd1Offset, blocks0, chainedPairs)
+
+lowerIFD0 :: ByteOrder -> IFD0 -> LayoutM (Word32 -> RawIFD, [BS.ByteString])
+lowerIFD0 order (IFD0 entries mExif mGps) = do
+  let extraCount = (if isJust mExif then 1 else 0) + (if isJust mGps then 1 else 0)
+      numEntries = M.size entries + extraCount
+      dirSize = 2 + 12 * fromIntegral numEntries + 4
+
+  modify $ \st -> st {lsOffset = lsOffset st + dirSize, lsBlocks = []}
+
+  rawEntriesList <- forM (M.toList entries) $ uncurry $ processEntry order
+
+  rawExifEntry <- case mExif of
+    Nothing -> return []
+    Just exifSub -> do
+      pending <- lowerExifSubPending order exifSub
+      rawEntry <- layoutPendingEntry order pending
+      return [(exifOffsetTag, rawEntry)]
+
+  rawGpsEntry <- case mGps of
+    Nothing -> return []
+    Just gps -> do
+      pending <- lowerGPSPending order gps
+      rawEntry <- layoutPendingEntry order pending
+      return [(gpsInfoTag, rawEntry)]
+
+  stAfter <- get
+  let ifdBlocks = reverse (lsBlocks stAfter)
+  modify $ \st -> st {lsBlocks = []}
+
+  let allEntries = M.fromList (rawEntriesList ++ rawExifEntry ++ rawGpsEntry)
+  return (\nextOff -> RawIFD (fromIntegral numEntries) allEntries nextOff, ifdBlocks)
+
+lowerExifSubPending :: ByteOrder -> ExifSubIFD -> LayoutM PendingDirectoryEntry
+lowerExifSubPending order exifSub = do
+  currentOff <- gets lsOffset
+  let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
+      ((rawIfd, ifdBlocks), _) = runState (lowerExifSubIFD order exifSub) initialState
+      subBytes = serializeChain order [rawIfd] [ifdBlocks]
+  return $ PendingDirectoryEntry exifOffsetTag 4 1 subBytes
+
+lowerExifSubIFD :: ByteOrder -> ExifSubIFD -> LayoutM (RawIFD, [BS.ByteString])
+lowerExifSubIFD order (ExifSubIFD entries mInterop) = do
+  let extraCount = if isJust mInterop then 1 else 0
+      numEntries = M.size entries + extraCount
+      dirSize = 2 + 12 * fromIntegral numEntries + 4
+
+  modify $ \st -> st {lsOffset = lsOffset st + dirSize, lsBlocks = []}
+
+  rawEntriesList <- forM (M.toList entries) $ uncurry $ processEntry order
+
+  rawInteropEntry <- case mInterop of
+    Nothing -> return []
+    Just interop -> do
+      pending <- lowerInteropPending order interop
+      rawEntry <- layoutPendingEntry order pending
+      return [(interopOffsetTag, rawEntry)]
+
+  stAfter <- get
+  let ifdBlocks = reverse (lsBlocks stAfter)
+  modify $ \st -> st {lsBlocks = []}
+
+  let allEntries = M.fromList (rawEntriesList ++ rawInteropEntry)
+  return (RawIFD (fromIntegral numEntries) allEntries 0, ifdBlocks)
+
+lowerGPSPending :: ByteOrder -> GPSIFD -> LayoutM PendingDirectoryEntry
+lowerGPSPending order (GPSIFD entries) = do
+  currentOff <- gets lsOffset
+  let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
+      ((rawIfd, ifdBlocks), _) = runState (lowerLeafEntries order entries) initialState
+      subBytes = serializeChain order [rawIfd] [ifdBlocks]
+  return $ PendingDirectoryEntry gpsInfoTag 4 1 subBytes
+
+lowerInteropPending :: ByteOrder -> InteropIFD -> LayoutM PendingDirectoryEntry
+lowerInteropPending order (InteropIFD entries) = do
+  currentOff <- gets lsOffset
+  let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
+      ((rawIfd, ifdBlocks), _) = runState (lowerLeafEntries order entries) initialState
+      subBytes = serializeChain order [rawIfd] [ifdBlocks]
+  return $ PendingDirectoryEntry interopOffsetTag 4 1 subBytes
+
+lowerLeafEntries :: ByteOrder -> M.Map Tag DirectoryEntryValue -> LayoutM (RawIFD, [BS.ByteString])
+lowerLeafEntries order entries = do
+  let numEntries = M.size entries
+      dirSize = 2 + 12 * fromIntegral numEntries + 4
+
+  modify $ \st -> st {lsOffset = lsOffset st + dirSize, lsBlocks = []}
+  rawEntriesList <- forM (M.toList entries) $ uncurry $ processEntry order
+
+  stAfter <- get
+  let ifdBlocks = reverse (lsBlocks stAfter)
+  modify $ \st -> st {lsBlocks = []}
+
+  let allEntries = M.fromList rawEntriesList
+  return (RawIFD (fromIntegral numEntries) allEntries 0, ifdBlocks)
 
 -- | Layouts a chain of IFDs sequentially using the State monad
 lowerIFDChain :: ByteOrder -> [IFD] -> LayoutM [(RawIFD, [BS.ByteString])]
@@ -75,27 +180,15 @@ lowerIFDChain order (ifd : ifds) = do
 -- | Lowers a single entry
 processEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> LayoutM (Tag, RawDirectoryEntry)
 processEntry order tag val = do
-  pending <- evaluateEntry order tag val
+  let pending = evaluateEntry order tag val
   rawEntry <- layoutPendingEntry order pending
   return (tag, rawEntry)
 
--- | Evaluates entry values, handling recursive sub-IFDs
--- | Evaluates entry values, handling recursive sub-IFDs
-evaluateEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> LayoutM PendingDirectoryEntry
+-- | Evaluates entry values
+evaluateEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> PendingDirectoryEntry
 evaluateEntry order tag val =
-  case val of
-    IFDPointer subIfd -> do
-      currentOff <- gets lsOffset
-      let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
-          (ifdPairs, finalSubState) = runState (lowerIFDChain order [subIfd]) initialState
-          -- Unpack raw IFDs and their respective data blocks for the sub-IFD
-          subRawIfds = map fst ifdPairs
-          subBlocks = map snd ifdPairs ++ [reverse (lsBlocks finalSubState)]
-          subBytes = serializeChain order subRawIfds subBlocks
-      return $ PendingDirectoryEntry tag 4 1 subBytes
-    _ -> do
-      let (typ, count, rawBytes) = encodeValue order val
-      return $ PendingDirectoryEntry tag typ count rawBytes
+  let (typ, count, rawBytes) = encodeValue order val
+   in PendingDirectoryEntry tag typ count rawBytes
 
 -- | Decides if entry bytes fit in the 4-byte pointer or require external state allocation
 layoutPendingEntry :: ByteOrder -> PendingDirectoryEntry -> LayoutM RawDirectoryEntry
@@ -168,7 +261,6 @@ encodeValue order val = case val of
   UnsignedLong8 ws -> (16, fromIntegral $ length ws, BL.toStrict $ runPut $ mapM_ (putW64 order) ws)
   SignedLong8 is -> (17, fromIntegral $ length is, BL.toStrict $ runPut $ mapM_ (putI64 order) is)
   Unknown typ count bs -> (typ, count, bs)
-  IFDPointer _ -> error "IFDPointer is handled structurally by evaluateEntry"
 
 packToWord32 :: ByteOrder -> BS.ByteString -> Word32
 packToWord32 order bytes =

@@ -7,7 +7,6 @@ import Data.ByteString qualified as BS
 import Data.Char (toLower)
 import Data.Either
 import Data.Map qualified as M
-import JPEGParser
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, (</>))
@@ -88,8 +87,8 @@ helloWorldExif =
       0x00
     ]
 
-findJpegs :: FilePath -> IO [FilePath]
-findJpegs dir = do
+findEXIFs :: FilePath -> IO [FilePath]
+findEXIFs dir = do
   entries <- listDirectory dir
   let paths = map (dir </>) entries
   foldM categorize [] paths
@@ -99,32 +98,26 @@ findJpegs dir = do
       isDir <- doesDirectoryExist path
       if isDir
         then do
-          subFiles <- findJpegs path
-          return (acc <> subFiles)
+          subFiles <- findEXIFs path
+          pure $ acc <> subFiles
         else do
-          let ext = map toLower (takeExtension path)
-          if ext `elem` [".jpg", ".jpeg"]
-            then return (path : acc)
-            else return acc
+          case map toLower (takeExtension path) of
+            ".exif" -> pure $ path : acc
+            _ -> pure acc
 
-getSamplesDir :: IO FilePath
-getSamplesDir = do
-  mDir <- lookupEnv "EXIF_SAMPLES_DIR"
-  case mDir of
-    Just dir -> pure dir
-    Nothing -> error "EXIF_SAMPLES_DIR environment variable is not set. Run via 'nix develop'."
+getSamplesDir :: IO (Maybe FilePath)
+getSamplesDir = lookupEnv "EXIF_SAMPLES_DIR"
 
 main :: IO ()
 main = do
   samples <- getSamplesDir
-  jpegs <- findJpegs samples
+  maybeExifs <- mapM findEXIFs samples
   hspec $ do
     describe "decodeExif" $ do
       it "decodes EXIF metadata from raw payload" $ do
         let result = decodeExif helloWorldExif
-        result
-          `shouldBe` Right
-            ( Exif
+            expectedResult =
+              Exif
                 { exifPayload =
                     IntelOrder
                       ( ExifData
@@ -138,23 +131,19 @@ main = do
                           }
                       )
                 }
-            )
+        result `shouldBe` Right expectedResult
 
     describe "QuickCheck Arbitrary Exif Map" $ do
       prop "exif encode decode roundtrip Intel" $ \exif ->
         decodeExif (encodeExif exif) `shouldBe` Right exif
 
     describe "Parse exif from sample files with roundtrip" $ do
-      forM_ jpegs $ \sample ->
-        it ("parse file " <> sample) $
-            extractExifBlob sample >>= \case
-              Left NoExifDataFound {} -> pure ()
-              Left e -> do
-                print e
-                pending
-              Right exifBS ->
-                case decodeExif exifBS of
-                  Left err ->
-                    expectationFailure $ "Failed to decode original camera EXIF: " <> show err
-                  Right originalEnvelope ->
-                    decodeExif (encodeExif originalEnvelope) `shouldBe` Right originalEnvelope
+      forM_ maybeExifs $ \exifs ->
+        forM_ exifs $ \sample ->
+          it ("parse file " <> sample) $ do
+            tiffBS <- BS.readFile sample
+            case decodeTiff tiffBS of
+              Left err ->
+                expectationFailure $ "Failed to decode original camera EXIF: " <> show err
+              Right tiff ->
+                decodeExif (encodeExif $ Exif tiff) `shouldBe` Right (Exif tiff)

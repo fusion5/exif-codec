@@ -1,6 +1,6 @@
 module Codec.Exif.Decode
   ( decodeExif,
-    decodeExifRaw,
+    decodeTiff,
     ParseError (..),
   )
 where
@@ -52,8 +52,8 @@ decodeExif :: BS.ByteString -> Either ParseError Exif
 decodeExif bs = decodeRawExif bs <&> Exif . convertRawTiff (BS.drop 6 bs) . rePayload
 
 -- | Decodes just the structural Tiff block
-decodeExifRaw :: BS.ByteString -> Either ParseError Tiff
-decodeExifRaw bs = decodeRawExif bs <&> convertRawTiff (BS.drop 6 bs) . rePayload
+decodeTiff :: BS.ByteString -> Either ParseError Tiff
+decodeTiff bs = decodeRawTiff bs <&> convertRawTiff bs -- . rePayload
 
 -- ---------------------------------------------------------------------------
 -- Conversion: Raw AST -> High-Level AST
@@ -178,17 +178,19 @@ runGetEither getBs bs =
     Left (_, _, err) -> Left $ ParseError err
     Right (_, _, val) -> Right val
 
--- | 1. Main decoding pipeline
 decodeRawExif :: BS.ByteString -> Either ParseError RawExif
 decodeRawExif bs = do
   unless (exifPrefix `BS.isPrefixOf` bs) $ Left MissingExifPrefix
   -- Everything from here on is relative to the start of the TIFF header.
-  let tiffBs = BS.drop 6 bs
+  RawExif <$> decodeRawTiff (BS.drop 6 bs)
+
+decodeRawTiff :: BS.ByteString -> Either ParseError RawTiff
+decodeRawTiff tiffBS = do
   -- Read the endianness and the offset to the first IFD
-  (order, ifd0Offset) <- runGetEither parseTiffHeader tiffBs
+  (order, ifd0Offset) <- runGetEither parseTiffHeader tiffBS
   -- Follow the linked list of IFDs using an empty Set for cycle detection
-  ifds <- parseIFDChain order tiffBs ifd0Offset S.empty
-  Right $ RawExif (RawTiff order (RawExifData ifds))
+  ifds <- parseIFDChain order tiffBS ifd0Offset S.empty
+  Right $ RawTiff order (RawExifData ifds)
 
 -- | 2. Sub-IFD Parser (Exposed for Step 2)
 parseRawIFD :: ByteOrder -> BS.ByteString -> Word32 -> Either ParseError RawIFD

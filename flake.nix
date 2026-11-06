@@ -31,12 +31,24 @@
           hash = "sha256-imVQZnG+WmzHBM0Gqj8+fG96h2PAxKkH2JNC/Ban3jw=";
         };
         exifSamplesDir = pkgs.stdenv.mkDerivation {
-          name = "ianare-exif-samples-jpg";
+          name = "exif-samples";
           src = "${exifSamplesSource}/jpg";
-
+          nativeBuildInputs = [pkgs.exiftool];
           installPhase = ''
             mkdir -p $out
-            cp -r ./* $out/
+
+            # Recursively find all Jpegs, extract their basename, and write directly to $out
+            find . -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.JPG" -o -name "*.JPEG" \) | while read -r file; do
+              flatname=$(echo "$file" | sed 's|^\./||' | tr '/' '_')
+              base="''${flatname%.*}"
+
+              # Attempt to extract EXIF. If it fails (no metadata), clean up and skip.
+              if exiftool -o "$out/$base.exif" -exif:all "$file" 2>/dev/null; then
+                true
+              else
+                rm -f "$out/$base.exif"
+              fi
+            done
           '';
         };
       in {

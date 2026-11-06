@@ -70,34 +70,36 @@ convertRawTiff tiffBs (RawTiff order (RawExifData rawIfds)) =
         Intel -> IntelOrder exifData
         Motorola -> MotorolaOrder exifData
 
+-- | Looks up an offset tag, parses its IFD chain, and applies a conversion function.
+lookupSubIFD ::
+  ByteOrder ->
+  BS.ByteString ->
+  Tag ->
+  M.Map Tag RawDirectoryEntry ->
+  (RawIFD -> a) ->
+  Maybe a
+lookupSubIFD order tiffBs offsetTag entries convertSub = do
+  rde <- M.lookup offsetTag entries
+  case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
+    Right (subRaw : _) -> Just (convertSub subRaw)
+    _ -> Nothing
+
 convertRawIFD0 :: ByteOrder -> BS.ByteString -> RawIFD -> IFD0
-convertRawIFD0 order tiffBs rawIFD =
-  let allEntries = rifdDirectoryEntries rawIFD
-      mExif = case M.lookup exifOffsetTag allEntries of
-        Just rde -> case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
-          Right (subRaw : _) -> Just (convertRawExifSubIFD order tiffBs subRaw)
-          _ -> Nothing
-        Nothing -> Nothing
-      mGps = case M.lookup gpsInfoTag allEntries of
-        Just rde -> case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
-          Right (subRaw : _) -> Just (convertRawGPSIFD order tiffBs subRaw)
-          _ -> Nothing
-        Nothing -> Nothing
-      cleanEntries = M.filterWithKey (\k _ -> k /= exifOffsetTag && k /= gpsInfoTag) allEntries
-      entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
-   in IFD0 entries mExif mGps
+convertRawIFD0 order tiffBs rawIFD = IFD0 entries mExif mGps
+  where
+    allEntries = rifdDirectoryEntries rawIFD
+    mExif = lookupSubIFD order tiffBs exifOffsetTag allEntries (convertRawExifSubIFD order tiffBs)
+    mGps = lookupSubIFD order tiffBs gpsInfoTag allEntries (convertRawGPSIFD order tiffBs)
+    cleanEntries = M.delete exifOffsetTag $ M.delete gpsInfoTag allEntries
+    entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
 
 convertRawExifSubIFD :: ByteOrder -> BS.ByteString -> RawIFD -> ExifSubIFD
-convertRawExifSubIFD order tiffBs rawIFD =
-  let allEntries = rifdDirectoryEntries rawIFD
-      mInterop = case M.lookup interopOffsetTag allEntries of
-        Just rde -> case parseIFDChain order tiffBs (rdeOffsetOrValue rde) S.empty of
-          Right (subRaw : _) -> Just (convertRawInteropIFD order tiffBs subRaw)
-          _ -> Nothing
-        Nothing -> Nothing
-      cleanEntries = M.filterWithKey (\k _ -> k /= interopOffsetTag) allEntries
-      entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
-   in ExifSubIFD entries mInterop
+convertRawExifSubIFD order tiffBs rawIFD = ExifSubIFD entries mInterop
+  where
+    allEntries = rifdDirectoryEntries rawIFD
+    mInterop = lookupSubIFD order tiffBs interopOffsetTag allEntries (convertRawInteropIFD order tiffBs)
+    cleanEntries = M.filterWithKey (\k _ -> k /= interopOffsetTag) allEntries
+    entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
 
 convertRawGPSIFD :: ByteOrder -> BS.ByteString -> RawIFD -> GPSIFD
 convertRawGPSIFD order tiffBs rawIFD =

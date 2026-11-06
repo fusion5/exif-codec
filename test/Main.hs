@@ -145,14 +145,14 @@ main = do
     describe "Parse exif from sample files with roundtrip" $ do
       forM_ jpegs $ \sample ->
         it ("parse file " <> sample) $
-          extractExifBlob sample >>= \case
-            Left NoExifDataFound {} -> pure ()
-            Left e -> do
-              print e
-              pending
-            Right exifBS ->
-              case decodeExif exifBS of
-                Left err ->
-                  expectationFailure $ "Failed to decode original camera EXIF: " <> show err
-                Right originalEnvelope ->
-                  decodeExif (encodeExif originalEnvelope) `shouldBe` Right originalEnvelope
+            extractExifBlob sample >>= \case
+              Left NoExifDataFound {} -> pure ()
+              Left e -> do
+                print e
+                pending
+              Right exifBS ->
+                case decodeExif exifBS of
+                  Left err ->
+                    expectationFailure $ "Failed to decode original camera EXIF: " <> show err
+                  Right originalEnvelope ->
+                    decodeExif (encodeExif originalEnvelope) `shouldBe` Right originalEnvelope

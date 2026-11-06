@@ -88,15 +88,19 @@ lowerIFD0 order (IFD0 entries mExif mGps) = do
   modify $ \st -> st {lsBlocks = []}
 
   let allEntries = M.fromList (rawEntriesList ++ rawExifEntry ++ rawGpsEntry)
-  return (\nextOff -> RawIFD (fromIntegral numEntries) allEntries nextOff, ifdBlocks)
+  return (RawIFD (fromIntegral numEntries) allEntries, ifdBlocks)
 
-lowerExifSubPending :: ByteOrder -> ExifSubIFD -> LayoutM PendingDirectoryEntry
-lowerExifSubPending order exifSub = do
+lowerSubIFDPending :: ByteOrder -> Tag -> LayoutM (RawIFD, [BS.ByteString]) -> LayoutM PendingDirectoryEntry
+lowerSubIFDPending order tag lowerSub = do
   currentOff <- gets lsOffset
   let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
-      ((rawIfd, ifdBlocks), _) = runState (lowerExifSubIFD order exifSub) initialState
+      ((rawIfd, ifdBlocks), _) = runState lowerSub initialState
       subBytes = serializeChain order [rawIfd] [ifdBlocks]
-  return $ PendingDirectoryEntry exifOffsetTag 4 1 subBytes
+  return $ PendingDirectoryEntry tag 4 1 subBytes
+
+lowerExifSubPending :: ByteOrder -> ExifSubIFD -> LayoutM PendingDirectoryEntry
+lowerExifSubPending order exifSub =
+  lowerSubIFDPending order exifOffsetTag (lowerExifSubIFD order exifSub)
 
 lowerExifSubIFD :: ByteOrder -> ExifSubIFD -> LayoutM (RawIFD, [BS.ByteString])
 lowerExifSubIFD order (ExifSubIFD entries mInterop) = do
@@ -123,20 +127,12 @@ lowerExifSubIFD order (ExifSubIFD entries mInterop) = do
   return (RawIFD (fromIntegral numEntries) allEntries 0, ifdBlocks)
 
 lowerGPSPending :: ByteOrder -> GPSIFD -> LayoutM PendingDirectoryEntry
-lowerGPSPending order (GPSIFD entries) = do
-  currentOff <- gets lsOffset
-  let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
-      ((rawIfd, ifdBlocks), _) = runState (lowerLeafEntries order entries) initialState
-      subBytes = serializeChain order [rawIfd] [ifdBlocks]
-  return $ PendingDirectoryEntry gpsInfoTag 4 1 subBytes
+lowerGPSPending order (GPSIFD entries) =
+  lowerSubIFDPending order gpsInfoTag (lowerLeafEntries order entries)
 
 lowerInteropPending :: ByteOrder -> InteropIFD -> LayoutM PendingDirectoryEntry
-lowerInteropPending order (InteropIFD entries) = do
-  currentOff <- gets lsOffset
-  let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
-      ((rawIfd, ifdBlocks), _) = runState (lowerLeafEntries order entries) initialState
-      subBytes = serializeChain order [rawIfd] [ifdBlocks]
-  return $ PendingDirectoryEntry interopOffsetTag 4 1 subBytes
+lowerInteropPending order (InteropIFD entries) =
+  lowerSubIFDPending order interopOffsetTag (lowerLeafEntries order entries)
 
 lowerLeafEntries :: ByteOrder -> M.Map Tag DirectoryEntryValue -> LayoutM (RawIFD, [BS.ByteString])
 lowerLeafEntries order entries = do

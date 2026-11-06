@@ -53,7 +53,7 @@ decodeExif bs = decodeRawExif bs <&> Exif . convertRawTiff (BS.drop 6 bs) . rePa
 
 -- | Decodes just the structural Tiff block
 decodeTiff :: BS.ByteString -> Either ParseError Tiff
-decodeTiff bs = decodeRawTiff bs <&> convertRawTiff bs -- . rePayload
+decodeTiff bs = decodeRawTiff bs <&> convertRawTiff bs
 
 -- ---------------------------------------------------------------------------
 -- Conversion: Raw AST -> High-Level AST

@@ -6,27 +6,31 @@ where
 import Data.ByteString qualified as BS
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (listToMaybe)
 import Data.Text ()
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
 import Prelude
 
-type Tag = Word16
+newtype Tag = Tag Word16
+  deriving (Show, Eq, Ord, Num)
+
+mkTag :: Word16 -> Tag
+mkTag = Tag
 
 data Directory = Directory0 | Directory1 | Sub | GPS | Interoperability
 
 -- | Tag 0x8769: Offset to Exif SubIFD
 exifSubIFDOffsetTag :: Tag
-exifSubIFDOffsetTag = 0x8769
+exifSubIFDOffsetTag = Tag 0x8769
 
 -- | Tag 0x8825: Offset to GPS SubIFD
 gpsInfoIFDOffsetTag :: Tag
-gpsInfoIFDOffsetTag = 0x8825
+gpsInfoIFDOffsetTag = Tag 0x8825
 
 -- | Tag 0xA005: Offset to Interoperability SubIFD
 interopIFDOffsetTag :: Tag
-interopIFDOffsetTag = 0xA005
+interopIFDOffsetTag = Tag 0xA005
 
 -- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
 newtype Exif = Exif
@@ -122,7 +126,7 @@ data DirectoryEntryValue
 data RawIFD = RawIFD
   { rifdNumberOfEntries :: Word16,
     -- | The key is the tag and the value is the entry value
-    rifdDirectoryEntries :: M.Map Word16 RawDirectoryEntry,
+    rifdDirectoryEntries :: M.Map Tag RawDirectoryEntry,
     rifdNextOffset :: Word32
   }
   deriving (Show, Eq, Generic)

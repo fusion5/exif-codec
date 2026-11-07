@@ -48,6 +48,7 @@ library
     Codec.Exif.Decode
     Codec.Exif.Encode
     Codec.Exif.Types
+    Codec.Exif.PrettyPrint
 
   build-depends:
     , base

@@ -242,7 +242,7 @@ getEntry order = do
   typ <- getW16 order
   count <- getW32 order
   offsetOrVal <- getW32 order
-  return (tag, RawDirectoryEntry typ count offsetOrVal)
+  return (Tag tag, RawDirectoryEntry typ count offsetOrVal)
 
 -- ---------------------------------------------------------------------------
 -- Endianness / Decoding Helpers

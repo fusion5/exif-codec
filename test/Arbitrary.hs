@@ -26,6 +26,9 @@ instance Arbitrary ExifData where
     chained <- scale (`div` 2) (replicateM numChained arbitrary)
     return $ ExifData ifd0 chained
 
+instance Arbitrary Tag where
+  arbitrary = mkTag <$> arbitrary
+
 instance Arbitrary IFD0 where
   arbitrary = sized $ \n -> do
     numEntries <- choose (0, min 5 n)

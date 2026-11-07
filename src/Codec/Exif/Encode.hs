@@ -91,8 +91,9 @@ lowerIFD0 order (IFD0 entries mExif mGps) = do
   let allEntries = M.fromList (rawEntriesList ++ rawExifEntry ++ rawGpsEntry)
   return (RawIFD (fromIntegral numEntries) allEntries, ifdBlocks)
 
-lowerSubIFDPending :: ByteOrder -> Tag -> LayoutM (RawIFD, [BS.ByteString]) -> LayoutM PendingDirectoryEntry
-lowerSubIFDPending order tag lowerSub = do
+lowerSubIFDPending ::
+  ByteOrder -> Tag -> LayoutM (RawIFD, [BS.ByteString]) -> LayoutM PendingDirectoryEntry
+lowerSubIFDPending order (Tag tag) lowerSub = do
   currentOff <- gets lsOffset
   let initialState = LayoutState {lsOffset = currentOff, lsBlocks = []}
       ((rawIfd, ifdBlocks), _) = runState lowerSub initialState
@@ -179,7 +180,7 @@ processEntry order tag val = do
 
 -- | Evaluates entry values
 evaluateEntry :: ByteOrder -> Tag -> DirectoryEntryValue -> PendingDirectoryEntry
-evaluateEntry order tag val =
+evaluateEntry order (Tag tag) val =
   let (typ, count, rawBytes) = encodeValue order val
    in PendingDirectoryEntry tag typ count rawBytes
 
@@ -227,7 +228,7 @@ serializeChain order rawIfds blocks = BS.concat $ do
 putRawIFD :: ByteOrder -> RawIFD -> BS.ByteString
 putRawIFD order rawIfd = BL.toStrict $ runPut $ do
   putW16 order (rifdNumberOfEntries rawIfd)
-  forM_ (M.toList $ rifdDirectoryEntries rawIfd) $ \(tag, rde) -> do
+  forM_ (M.toList $ rifdDirectoryEntries rawIfd) $ \(Tag tag, rde) -> do
     putW16 order tag
     putW16 order (rdeType rde)
     putW32 order (rdeCount rde)

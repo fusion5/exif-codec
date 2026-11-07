@@ -1,19 +1,32 @@
 module Codec.Exif
-  ( decodeExif,
+  ( -- * Decoding
+    decodeExif,
     decodeTiff,
     ParseError (..),
-    Codec.Exif.Encode.encodeExif,
-    module Exports,
+
+    -- * Encoding
+    encodeExif,
+
+    -- * Types
+    Tag,
+    Directory (..),
+    DirectoryEntryValue (..),
+    Exif (..),
+    ByteOrder (..),
+    alterDirectoryTag,
+    emptyExif,
+    getDirectoryTag,
   )
 where
 
 import Codec.Exif.Decode (ParseError (..), decodeExif, decodeTiff)
 import Codec.Exif.Encode (encodeExif)
-import Codec.Exif.Types as Exports
-  ( Directory (..),
+import Codec.Exif.Types
+  ( ByteOrder (..),
+    Directory (..),
     DirectoryEntryValue (..),
     Exif (..),
-    ByteOrder (..),
+    Tag,
     alterDirectoryTag,
     emptyExif,
     getDirectoryTag,

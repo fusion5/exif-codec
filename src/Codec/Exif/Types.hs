@@ -6,12 +6,15 @@ where
 import Data.ByteString qualified as BS
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Map qualified as M
+import Data.Maybe (listToMaybe)
 import Data.Text ()
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
 import Prelude
 
 type Tag = Word16
+
+data Directory = Directory0 | Directory1 | Sub | GPS | Interoperability
 
 -- | Tag 0x8769: Offset to Exif SubIFD
 exifOffsetTag :: Tag
@@ -149,23 +152,18 @@ newtype GPSIFD = GPSIFD
   }
   deriving (Eq, Show, Generic)
 
-newtype InteropIFD = InteropIFD
-  { interopEntries :: M.Map Tag DirectoryEntryValue
-  }
-  deriving (Eq, Show, Generic)
-
 -- | Exif SubIFD: contains camera settings and can ONLY branch to Interop
-data ExifSubIFD = ExifSubIFD
+data SubIFD = SubIFD
   { exifEntries :: M.Map Tag DirectoryEntryValue,
-    exifInterop :: Maybe InteropIFD
+    exifInterop :: Maybe IFD
   }
   deriving (Eq, Show, Generic)
 
--- | IFD0: primary image directory; can branch to ExifSubIFD and GPSIFD
+-- | IFD0: primary image directory; can branch to SubIFD and GPSIFD
 data IFD0 = IFD0
   { ifd0Entries :: M.Map Tag DirectoryEntryValue,
-    ifd0Exif :: Maybe ExifSubIFD,
-    ifd0GPS :: Maybe GPSIFD
+    ifd0SubIFD :: Maybe SubIFD,
+    ifd0GPSIFD :: Maybe GPSIFD
   }
   deriving (Eq, Show, Generic)
 
@@ -194,3 +192,30 @@ data ExifData = ExifData
     exifChainedIFDs :: [IFD]
   }
   deriving (Eq, Show, Generic)
+
+getExifData :: Exif -> (ByteOrder, ExifData)
+getExifData (Exif (IntelOrder exifData)) = (Intel, exifData)
+getExifData (Exif (MotorolaOrder exifData)) = (Motorola, exifData)
+
+getDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue
+getDirectoryTag exif directory tag =
+  case directory of
+    Directory0 -> M.lookup tag (ifd0Entries ifd0)
+    Directory1 -> do
+      ifd1 <- listToMaybe ifds
+      M.lookup tag (ifdEntries ifd1)
+    Sub -> do
+      subIFD <- ifd0SubIFD ifd0
+      M.lookup tag $ exifEntries subIFD
+    GPS -> do
+      gpsIFD <- ifd0SubIFD ifd0
+      M.lookup tag $ exifEntries gpsIFD
+    Interoperability -> do
+      subIFD <- ifd0SubIFD ifd0
+      interopIFD <- exifInterop subIFD
+      M.lookup tag $ ifdEntries interopIFD
+  where
+    (_, ExifData ifd0 ifds) = getExifData exif
+
+setDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue
+setDirectoryTag = error "TODO"

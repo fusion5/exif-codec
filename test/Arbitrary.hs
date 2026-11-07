@@ -34,22 +34,17 @@ instance Arbitrary IFD0 where
     let entries = M.fromList (zip tags vals)
     if n <= 0
       then return $ IFD0 entries Nothing Nothing
-      else do
-        mExif <- arbitrary
-        mGps <- arbitrary
-        return $ IFD0 entries mExif mGps
+      else IFD0 entries <$> arbitrary <*> arbitrary
 
-instance Arbitrary ExifSubIFD where
+instance Arbitrary SubIFD where
   arbitrary = sized $ \n -> do
     numEntries <- choose (0, min 5 n)
     tags <- vectorOf numEntries (arbitrary `suchThat` (/= interopOffsetTag))
     vals <- replicateM numEntries arbitrary
     let entries = M.fromList (zip tags vals)
     if n <= 0
-      then return $ ExifSubIFD entries Nothing
-      else do
-        mInterop <- arbitrary
-        return $ ExifSubIFD entries mInterop
+      then return $ SubIFD entries Nothing
+      else SubIFD entries <$> arbitrary
 
 instance Arbitrary GPSIFD where
   arbitrary = sized $ \n -> do
@@ -57,13 +52,6 @@ instance Arbitrary GPSIFD where
     tags <- replicateM numEntries arbitrary
     vals <- replicateM numEntries arbitrary
     return $ GPSIFD (M.fromList (zip tags vals))
-
-instance Arbitrary InteropIFD where
-  arbitrary = sized $ \n -> do
-    numEntries <- choose (0, min 5 n)
-    tags <- replicateM numEntries arbitrary
-    vals <- replicateM numEntries arbitrary
-    return $ InteropIFD (M.fromList (zip tags vals))
 
 instance Arbitrary IFD where
   arbitrary = sized $ \n -> do

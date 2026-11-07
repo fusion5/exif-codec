@@ -38,18 +38,19 @@ type LayoutM = State LayoutState
 
 -- | Lowers the high-level AST into structural TIFF headers and collects external payloads
 lowerExif :: Exif -> (RawExif, [[BS.ByteString]])
-lowerExif (Exif tiff) =
-  let (order, ExifData ifd0 chained) = case tiff of
-        IntelOrder ed -> (Intel, ed)
-        MotorolaOrder ed -> (Motorola, ed)
+lowerExif exif = (RawExif (RawTiff order (RawExifData rawIfds)), dataBlocks)
+  where
+    (order, ExifData ifd0 chained) = getExifData exif
+    initialState = LayoutState {lsOffset = 8, lsBlocks = []}
+    ((raw0, blocks0, rawChained), _) = runState (lowerAll order ifd0 chained) initialState
+    rawIfds = raw0 : map fst rawChained
+    dataBlocks = blocks0 : map snd rawChained
 
-      initialState = LayoutState {lsOffset = 8, lsBlocks = []}
-      ((raw0, blocks0, rawChained), _) = runState (lowerAll order ifd0 chained) initialState
-      rawIfds = raw0 : map fst rawChained
-      dataBlocks = blocks0 : map snd rawChained
-   in (RawExif (RawTiff order (RawExifData rawIfds)), dataBlocks)
-
-lowerAll :: ByteOrder -> IFD0 -> [IFD] -> LayoutM (RawIFD, [BS.ByteString], [(RawIFD, [BS.ByteString])])
+lowerAll ::
+  ByteOrder ->
+  IFD0 ->
+  [IFD] ->
+  LayoutM (RawIFD, [BS.ByteString], [(RawIFD, [BS.ByteString])])
 lowerAll order ifd0 chained = do
   (raw0WithoutNext, blocks0) <- lowerIFD0 order ifd0
   if null chained
@@ -98,12 +99,12 @@ lowerSubIFDPending order tag lowerSub = do
       subBytes = serializeChain order [rawIfd] [ifdBlocks]
   return $ PendingDirectoryEntry tag 4 1 subBytes
 
-lowerExifSubPending :: ByteOrder -> ExifSubIFD -> LayoutM PendingDirectoryEntry
+lowerExifSubPending :: ByteOrder -> SubIFD -> LayoutM PendingDirectoryEntry
 lowerExifSubPending order exifSub =
   lowerSubIFDPending order exifOffsetTag (lowerExifSubIFD order exifSub)
 
-lowerExifSubIFD :: ByteOrder -> ExifSubIFD -> LayoutM (RawIFD, [BS.ByteString])
-lowerExifSubIFD order (ExifSubIFD entries mInterop) = do
+lowerExifSubIFD :: ByteOrder -> SubIFD -> LayoutM (RawIFD, [BS.ByteString])
+lowerExifSubIFD order (SubIFD entries mInterop) = do
   let extraCount = if isJust mInterop then 1 else 0
       numEntries = M.size entries + extraCount
       dirSize = 2 + 12 * fromIntegral numEntries + 4
@@ -130,8 +131,8 @@ lowerGPSPending :: ByteOrder -> GPSIFD -> LayoutM PendingDirectoryEntry
 lowerGPSPending order (GPSIFD entries) =
   lowerSubIFDPending order gpsInfoTag (lowerLeafEntries order entries)
 
-lowerInteropPending :: ByteOrder -> InteropIFD -> LayoutM PendingDirectoryEntry
-lowerInteropPending order (InteropIFD entries) =
+lowerInteropPending :: ByteOrder -> IFD -> LayoutM PendingDirectoryEntry
+lowerInteropPending order (IFD entries) =
   lowerSubIFDPending order interopOffsetTag (lowerLeafEntries order entries)
 
 lowerLeafEntries :: ByteOrder -> M.Map Tag DirectoryEntryValue -> LayoutM (RawIFD, [BS.ByteString])

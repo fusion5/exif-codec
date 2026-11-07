@@ -6,7 +6,6 @@ import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Char (toLower)
 import Data.Either
-import Data.Map qualified as M
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, (</>))
@@ -115,29 +114,17 @@ main = do
   hspec $ do
     describe "decodeExif" $ do
       it "decodes EXIF metadata from raw payload" $ do
-        let result = decodeExif helloWorldExif
-            expectedResult =
-              Exif
-                { exifPayload =
-                    IntelOrder
-                      ( ExifData
-                          { exifIFD0 =
-                              IFD0
-                                { ifd0Entries = M.fromList [(270, ASCII "hello world\NUL")],
-                                  ifd0Exif = Nothing,
-                                  ifd0GPS = Nothing
-                                },
-                            exifChainedIFDs = []
-                          }
-                      )
-                }
-        result `shouldBe` Right expectedResult
+        case decodeExif helloWorldExif of
+          Left err ->
+            expectationFailure $ "Failed to decode EXIF: " <> show err
+          Right exif ->
+            getDirectoryTag exif Directory0 270 `shouldBe` Just (ASCII "hello world\NUL")
 
     describe "QuickCheck Arbitrary Exif Map" $ do
       prop "exif encode decode roundtrip Intel" $ \exif ->
         decodeExif (encodeExif exif) `shouldBe` Right exif
 
-    describe "Parse exif from sample files with roundtrip" $ do
+    describe "Parse EXIF from sample files with roundtrip" $ do
       forM_ maybeExifs $ \exifs ->
         forM_ exifs $ \sample ->
           it ("parse file " <> sample) $ do

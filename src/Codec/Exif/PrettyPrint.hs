@@ -16,8 +16,6 @@ import Data.Word
 import Text.Printf
 
 -- | Maps a Directory, Tag, and Value to a pretty-printed Text representation.
--- GPS
--- Interoperability
 prettyPrint :: Directory -> Tag -> DirectoryEntryValue -> T.Text
 prettyPrint Directory1 tag value = prettyPrint Directory0 tag value
 prettyPrint Directory0 ImageProcessingSoftware (ASCII bs) = ppASCII bs
@@ -470,9 +468,6 @@ ppResolutionUnit =
 
 ppYCbCrPositioning :: DirectoryEntryValue -> T.Text
 ppYCbCrPositioning = fromNumberMap [(1, "Centered"), (2, "Co-sited")]
-
--- ppAperture :: DirectoryEntryValue -> Text
--- ppAperture = T.pack . printf "f/%s" . formatAsFloatingPoint 1
 
 -- ! Pretty-print aperture stored as APEX value.
 -- See: https://photo.stackexchange.com/questions/19143/how-can-the-aperture-value-written-in-exif-be-larger-than-the-nominal-limit-of-t

@@ -17,11 +17,15 @@ module Codec.Exif
     emptyExif,
     getDirectoryTag,
     getDirectoryTags,
+    prettyPrint,
+    module Codec.Exif.Patterns,
   )
 where
 
 import Codec.Exif.Decode (ParseError (..), decodeExif, decodeTiff)
 import Codec.Exif.Encode (encodeExif)
+import Codec.Exif.Patterns
+import Codec.Exif.PrettyPrint (prettyPrint)
 import Codec.Exif.Types
   ( ByteOrder (..),
     Directory (..),

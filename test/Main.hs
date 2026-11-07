@@ -6,6 +6,7 @@ import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Char (toLower)
 import Data.Either
+import Data.Map (traverseWithKey)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, (</>))
@@ -126,7 +127,10 @@ main = do
         exif3 `shouldBe` exif1
 
     describe "QuickCheck Arbitrary Exif Map" $ do
-      prop "exif encode decode roundtrip Intel" $ \exif ->
+      prop "exif encode decode roundtrip Intel" $ \exif -> do
+        forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
+          let tags = getDirectoryTags exif dir
+          flip traverseWithKey tags $ \k v -> print $ prettyPrint dir k v
         decodeExif (encodeExif exif) `shouldBe` Right exif
 
     describe "Parse EXIF from sample files with roundtrip" $ do

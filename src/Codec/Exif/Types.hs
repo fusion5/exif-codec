@@ -64,14 +64,14 @@ data URational = URational
   { urNumerator :: Word32,
     urDenominator :: Word32
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Ord)
 
 -- | Signed rational number (numerator, denominator).
 data SRational = SRational
   { srNumerator :: Int32,
     srDenominator :: Int32
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Ord)
 
 data RawDirectoryEntry = RawDirectoryEntry
   { -- | The data type (byte, ascii, short, long...)
@@ -113,7 +113,7 @@ data DirectoryEntryValue
   | -- | Same as above
     SignedLong8 [Int64]
   | Unknown Word16 Word32 BS.ByteString
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Ord)
 
 data RawIFD = RawIFD
   { rifdNumberOfEntries :: Word16,

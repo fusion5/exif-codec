@@ -77,10 +77,6 @@ data SRational = SRational
   }
   deriving (Eq, Show, Generic)
 
--- ---------------------------------------------------------------------------
--- Typed entry values
-
--- Low level directory entry
 data RawDirectoryEntry = RawDirectoryEntry
   { -- | The data type (byte, ascii, short, long...)
     rdeType :: Word16,
@@ -123,9 +119,6 @@ data DirectoryEntryValue
   | Unknown Word16 Word32 BS.ByteString
   deriving (Eq, Show, Generic)
 
--- ---------------------------------------------------------------------------
--- Image File Directory (IFD)
-
 data RawIFD = RawIFD
   { rifdNumberOfEntries :: Word16,
     -- | The key is the tag and the value is the entry value
@@ -154,9 +147,6 @@ data IFD0 = IFD0
     ifd0GPSIFD :: Maybe IFD
   }
   deriving (Eq, Show, Generic)
-
--- ---------------------------------------------------------------------------
--- Exif Abstract Syntax Tree
 
 newtype RawExifData = RawExifData
   { rawIFDs :: [RawIFD]
@@ -187,8 +177,8 @@ getDirectoryTag exif directory tag =
       subIFD <- ifd0SubIFD ifd0
       M.lookup tag $ ifdSubEntries subIFD
     GPS -> do
-      gpsIFD <- ifd0SubIFD ifd0
-      M.lookup tag $ ifdSubEntries gpsIFD
+      gpsIFD <- ifd0GPSIFD ifd0
+      M.lookup tag $ ifdEntries gpsIFD
     Interoperability -> do
       subIFD <- ifd0SubIFD ifd0
       interopIFD <- ifdSubInterop subIFD
@@ -196,5 +186,63 @@ getDirectoryTag exif directory tag =
   where
     (_, ExifData ifd0 ifds) = getExifData exif
 
-setDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue
-setDirectoryTag = error "TODO"
+alterDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue -> Exif
+alterDirectoryTag (Exif tiff) dir tag mVal = Exif $ case tiff of
+  IntelOrder ed -> IntelOrder $ alterExifData ed dir tag mVal
+  MotorolaOrder ed -> MotorolaOrder $ alterExifData ed dir tag mVal
+
+overIFD0 :: (IFD0 -> IFD0) -> ExifData -> ExifData
+overIFD0 f ed = ed {exifIFD0 = f (exifIFD0 ed)}
+
+overChainedIFDs :: ([IFD] -> [IFD]) -> ExifData -> ExifData
+overChainedIFDs f ed = ed {exifChainedIFDs = f (exifChainedIFDs ed)}
+
+overIFD0Entries :: (M.Map Tag DirectoryEntryValue -> M.Map Tag DirectoryEntryValue) -> IFD0 -> IFD0
+overIFD0Entries f ifd0 = ifd0 {ifd0Entries = f (ifd0Entries ifd0)}
+
+overSubIFD :: (Maybe SubIFD -> Maybe SubIFD) -> IFD0 -> IFD0
+overSubIFD f ifd0 = ifd0 {ifd0SubIFD = f (ifd0SubIFD ifd0)}
+
+overGPSIFD :: (Maybe IFD -> Maybe IFD) -> IFD0 -> IFD0
+overGPSIFD f ifd0 = ifd0 {ifd0GPSIFD = f (ifd0GPSIFD ifd0)}
+
+alterTagMap ::
+  Tag -> Maybe DirectoryEntryValue -> M.Map Tag DirectoryEntryValue -> M.Map Tag DirectoryEntryValue
+alterTagMap tag mVal = M.alter (const mVal) tag
+
+alterChainedIFDs :: Tag -> Maybe DirectoryEntryValue -> [IFD] -> [IFD]
+alterChainedIFDs _ Nothing [] = []
+alterChainedIFDs tag (Just v) [] = [IFD {ifdEntries = M.singleton tag v}]
+alterChainedIFDs tag mVal (ifd1 : xs) =
+  ifd1 {ifdEntries = alterTagMap tag mVal (ifdEntries ifd1)} : xs
+
+alterMaybeIFD :: Tag -> Maybe DirectoryEntryValue -> Maybe IFD -> Maybe IFD
+alterMaybeIFD _ Nothing Nothing = Nothing
+alterMaybeIFD tag (Just v) Nothing = Just IFD {ifdEntries = M.singleton tag v}
+alterMaybeIFD tag mVal (Just ifd) = Just ifd {ifdEntries = alterTagMap tag mVal (ifdEntries ifd)}
+
+alterMaybeSubIFD :: Tag -> Maybe DirectoryEntryValue -> Maybe SubIFD -> Maybe SubIFD
+alterMaybeSubIFD _ Nothing Nothing = Nothing
+alterMaybeSubIFD tag (Just v) Nothing =
+  Just SubIFD {ifdSubEntries = M.singleton tag v, ifdSubInterop = Nothing}
+alterMaybeSubIFD tag mVal (Just sub) =
+  Just sub {ifdSubEntries = alterTagMap tag mVal (ifdSubEntries sub)}
+
+alterMaybeInterop :: Tag -> Maybe DirectoryEntryValue -> Maybe SubIFD -> Maybe SubIFD
+alterMaybeInterop _ Nothing Nothing = Nothing
+alterMaybeInterop tag (Just v) Nothing =
+  Just SubIFD {ifdSubEntries = M.empty, ifdSubInterop = Just IFD {ifdEntries = M.singleton tag v}}
+alterMaybeInterop tag mVal (Just sub) =
+  Just sub {ifdSubInterop = alterMaybeIFD tag mVal (ifdSubInterop sub)}
+
+alterExifData :: ExifData -> Directory -> Tag -> Maybe DirectoryEntryValue -> ExifData
+alterExifData ed Directory0 tag mVal =
+  (overIFD0 . overIFD0Entries) (alterTagMap tag mVal) ed
+alterExifData ed Directory1 tag mVal =
+  overChainedIFDs (alterChainedIFDs tag mVal) ed
+alterExifData ed Sub tag mVal =
+  (overIFD0 . overSubIFD) (alterMaybeSubIFD tag mVal) ed
+alterExifData ed GPS tag mVal =
+  (overIFD0 . overGPSIFD) (alterMaybeIFD tag mVal) ed
+alterExifData ed Interoperability tag mVal =
+  (overIFD0 . overSubIFD) (alterMaybeInterop tag mVal) ed

@@ -128,9 +128,6 @@ main = do
 
     describe "QuickCheck Arbitrary Exif Map" $ do
       prop "exif encode decode roundtrip Intel" $ \exif -> do
-        forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
-          let tags = getDirectoryTags exif dir
-          flip traverseWithKey tags $ \k v -> print $ prettyPrint dir k v
         decodeExif (encodeExif exif) `shouldBe` Right exif
 
     describe "Parse EXIF from sample files with roundtrip" $ do
@@ -141,5 +138,8 @@ main = do
             case decodeTiff tiffBS of
               Left err ->
                 expectationFailure $ "Failed to decode original camera EXIF: " <> show err
-              Right tiff ->
+              Right tiff -> do
+                forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
+                  let tags = getDirectoryTags (Exif tiff) dir
+                  flip traverseWithKey tags $ \k v -> print $ prettyPrint dir k v
                 decodeExif (encodeExif $ Exif tiff) `shouldBe` Right (Exif tiff)

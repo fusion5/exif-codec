@@ -16,6 +16,7 @@ module Codec.Exif
     alterDirectoryTag,
     emptyExif,
     getDirectoryTag,
+    getDirectoryTags,
   )
 where
 
@@ -30,4 +31,5 @@ import Codec.Exif.Types
     alterDirectoryTag,
     emptyExif,
     getDirectoryTag,
+    getDirectoryTags,
   )

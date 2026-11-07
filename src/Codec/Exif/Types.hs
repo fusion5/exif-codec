@@ -6,7 +6,7 @@ where
 import Data.ByteString qualified as BS
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Map qualified as M
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text ()
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
@@ -179,25 +179,19 @@ getExifData :: Exif -> (ByteOrder, ExifData)
 getExifData (Exif (IntelOrder exifData)) = (Intel, exifData)
 getExifData (Exif (MotorolaOrder exifData)) = (Motorola, exifData)
 
-getDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue
-getDirectoryTag exif directory tag =
-  case directory of
-    Directory0 -> M.lookup tag (ifd0Entries ifd0)
-    Directory1 -> do
-      ifd1 <- listToMaybe ifds
-      M.lookup tag (ifdEntries ifd1)
-    Sub -> do
-      subIFD <- ifd0SubIFD ifd0
-      M.lookup tag $ ifdSubEntries subIFD
-    GPS -> do
-      gpsIFD <- ifd0GPSIFD ifd0
-      M.lookup tag $ ifdEntries gpsIFD
-    Interoperability -> do
-      subIFD <- ifd0SubIFD ifd0
-      interopIFD <- ifdSubInterop subIFD
-      M.lookup tag $ ifdEntries interopIFD
+getDirectoryTags :: Exif -> Directory -> M.Map Tag DirectoryEntryValue
+getDirectoryTags exif = \case
+  Directory0 -> ifd0Entries ifd0
+  Directory1 -> maybe M.empty ifdEntries $ listToMaybe ifds
+  Sub -> maybe M.empty ifdSubEntries $ ifd0SubIFD ifd0
+  GPS -> maybe M.empty ifdEntries $ ifd0GPSIFD ifd0
+  Interoperability -> maybe M.empty ifdEntries $ ifd0SubIFD ifd0 >>= ifdSubInterop
   where
     (_, ExifData ifd0 ifds) = getExifData exif
+
+getDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue
+getDirectoryTag exif directory tag =
+  M.lookup tag $ getDirectoryTags exif directory
 
 alterDirectoryTag :: Exif -> Directory -> Tag -> Maybe DirectoryEntryValue -> Exif
 alterDirectoryTag (Exif tiff) dir tag mVal = Exif $ case tiff of

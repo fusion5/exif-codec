@@ -17,16 +17,16 @@ type Tag = Word16
 data Directory = Directory0 | Directory1 | Sub | GPS | Interoperability
 
 -- | Tag 0x8769: Offset to Exif SubIFD
-exifOffsetTag :: Tag
-exifOffsetTag = 0x8769
+exifSubIFDOffsetTag :: Tag
+exifSubIFDOffsetTag = 0x8769
 
 -- | Tag 0x8825: Offset to GPS SubIFD
-gpsInfoTag :: Tag
-gpsInfoTag = 0x8825
+gpsInfoIFDOffsetTag :: Tag
+gpsInfoIFDOffsetTag = 0x8825
 
 -- | Tag 0xA005: Offset to Interoperability SubIFD
-interopOffsetTag :: Tag
-interopOffsetTag = 0xA005
+interopIFDOffsetTag :: Tag
+interopIFDOffsetTag = 0xA005
 
 -- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
 newtype Exif = Exif
@@ -93,13 +93,6 @@ data RawDirectoryEntry = RawDirectoryEntry
   }
   deriving (Show, Eq, Generic)
 
--- | High-level typed representation of an Exif entry's payload values.
-data DirectoryEntry = DirectoryEntry
-  { deTag :: Word16,
-    deValue :: DirectoryEntryValue
-  }
-  deriving (Eq, Show, Generic)
-
 -- | Representing an entry during the encoding pipeline:
 data PendingDirectoryEntry = PendingDirectoryEntry
   { peTag :: Word16,
@@ -122,7 +115,7 @@ data DirectoryEntryValue
   | SignedRational [SRational]
   | SingleFloat [Float]
   | DoubleFloat [Double]
-  | -- | technically part of the BigTIFF specification, not standard EXIF/TIFF (which limits offsets
+  | -- | Technically part of the BigTIFF specification, not standard EXIF/TIFF (which limits offsets
     -- and sizes to 32-bit).
     UnsignedLong8 [Word64]
   | -- | Same as above
@@ -147,15 +140,10 @@ newtype IFD = IFD
   }
   deriving (Eq, Show, Generic)
 
-newtype GPSIFD = GPSIFD
-  { gpsEntries :: M.Map Tag DirectoryEntryValue
-  }
-  deriving (Eq, Show, Generic)
-
 -- | Exif SubIFD: contains camera settings and can ONLY branch to Interop
 data SubIFD = SubIFD
-  { exifEntries :: M.Map Tag DirectoryEntryValue,
-    exifInterop :: Maybe IFD
+  { ifdSubEntries :: M.Map Tag DirectoryEntryValue,
+    ifdSubInterop :: Maybe IFD
   }
   deriving (Eq, Show, Generic)
 
@@ -163,17 +151,8 @@ data SubIFD = SubIFD
 data IFD0 = IFD0
   { ifd0Entries :: M.Map Tag DirectoryEntryValue,
     ifd0SubIFD :: Maybe SubIFD,
-    ifd0GPSIFD :: Maybe GPSIFD
+    ifd0GPSIFD :: Maybe IFD
   }
-  deriving (Eq, Show, Generic)
-
--- ---------------------------------------------------------------------------
--- Thumbnail
-
--- | Thumbnail image optionally embedded in IFD1.
-data Thumbnail
-  = JpegThumbnail BS.ByteString
-  | TiffThumbnail BS.ByteString
   deriving (Eq, Show, Generic)
 
 -- ---------------------------------------------------------------------------
@@ -206,13 +185,13 @@ getDirectoryTag exif directory tag =
       M.lookup tag (ifdEntries ifd1)
     Sub -> do
       subIFD <- ifd0SubIFD ifd0
-      M.lookup tag $ exifEntries subIFD
+      M.lookup tag $ ifdSubEntries subIFD
     GPS -> do
       gpsIFD <- ifd0SubIFD ifd0
-      M.lookup tag $ exifEntries gpsIFD
+      M.lookup tag $ ifdSubEntries gpsIFD
     Interoperability -> do
       subIFD <- ifd0SubIFD ifd0
-      interopIFD <- exifInterop subIFD
+      interopIFD <- ifdSubInterop subIFD
       M.lookup tag $ ifdEntries interopIFD
   where
     (_, ExifData ifd0 ifds) = getExifData exif

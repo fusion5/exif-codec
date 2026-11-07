@@ -75,14 +75,14 @@ lowerIFD0 order (IFD0 entries mExif mGps) = do
     Just exifSub -> do
       pending <- lowerExifSubPending order exifSub
       rawEntry <- layoutPendingEntry order pending
-      return [(exifOffsetTag, rawEntry)]
+      return [(exifSubIFDOffsetTag, rawEntry)]
 
   rawGpsEntry <- case mGps of
     Nothing -> return []
     Just gps -> do
-      pending <- lowerGPSPending order gps
+      pending <- lowerIFDPending order gps
       rawEntry <- layoutPendingEntry order pending
-      return [(gpsInfoTag, rawEntry)]
+      return [(gpsInfoIFDOffsetTag, rawEntry)]
 
   stAfter <- get
   let ifdBlocks = reverse (lsBlocks stAfter)
@@ -101,7 +101,7 @@ lowerSubIFDPending order tag lowerSub = do
 
 lowerExifSubPending :: ByteOrder -> SubIFD -> LayoutM PendingDirectoryEntry
 lowerExifSubPending order exifSub =
-  lowerSubIFDPending order exifOffsetTag (lowerExifSubIFD order exifSub)
+  lowerSubIFDPending order exifSubIFDOffsetTag (lowerExifSubIFD order exifSub)
 
 lowerExifSubIFD :: ByteOrder -> SubIFD -> LayoutM (RawIFD, [BS.ByteString])
 lowerExifSubIFD order (SubIFD entries mInterop) = do
@@ -116,9 +116,9 @@ lowerExifSubIFD order (SubIFD entries mInterop) = do
   rawInteropEntry <- case mInterop of
     Nothing -> return []
     Just interop -> do
-      pending <- lowerInteropPending order interop
+      pending <- lowerIFDPending order interop
       rawEntry <- layoutPendingEntry order pending
-      return [(interopOffsetTag, rawEntry)]
+      return [(interopIFDOffsetTag, rawEntry)]
 
   stAfter <- get
   let ifdBlocks = reverse (lsBlocks stAfter)
@@ -127,13 +127,9 @@ lowerExifSubIFD order (SubIFD entries mInterop) = do
   let allEntries = M.fromList (rawEntriesList ++ rawInteropEntry)
   return (RawIFD (fromIntegral numEntries) allEntries 0, ifdBlocks)
 
-lowerGPSPending :: ByteOrder -> GPSIFD -> LayoutM PendingDirectoryEntry
-lowerGPSPending order (GPSIFD entries) =
-  lowerSubIFDPending order gpsInfoTag (lowerLeafEntries order entries)
-
-lowerInteropPending :: ByteOrder -> IFD -> LayoutM PendingDirectoryEntry
-lowerInteropPending order (IFD entries) =
-  lowerSubIFDPending order interopOffsetTag (lowerLeafEntries order entries)
+lowerIFDPending :: ByteOrder -> IFD -> LayoutM PendingDirectoryEntry
+lowerIFDPending order (IFD entries) =
+  lowerSubIFDPending order interopIFDOffsetTag (lowerLeafEntries order entries)
 
 lowerLeafEntries :: ByteOrder -> M.Map Tag DirectoryEntryValue -> LayoutM (RawIFD, [BS.ByteString])
 lowerLeafEntries order entries = do

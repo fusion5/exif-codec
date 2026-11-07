@@ -88,22 +88,18 @@ convertRawIFD0 :: ByteOrder -> BS.ByteString -> RawIFD -> IFD0
 convertRawIFD0 order tiffBs rawIFD = IFD0 entries mExif mGps
   where
     allEntries = rifdDirectoryEntries rawIFD
-    mExif = lookupSubIFD order tiffBs exifOffsetTag allEntries (convertRawExifSubIFD order tiffBs)
-    mGps = lookupSubIFD order tiffBs gpsInfoTag allEntries (convertRawGPSIFD order tiffBs)
-    cleanEntries = M.delete exifOffsetTag $ M.delete gpsInfoTag allEntries
+    mExif = lookupSubIFD order tiffBs exifSubIFDOffsetTag allEntries (convertRawExifSubIFD order tiffBs)
+    mGps = lookupSubIFD order tiffBs gpsInfoIFDOffsetTag allEntries (convertRawIFD order tiffBs)
+    cleanEntries = M.delete exifSubIFDOffsetTag $ M.delete gpsInfoIFDOffsetTag allEntries
     entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
 
 convertRawExifSubIFD :: ByteOrder -> BS.ByteString -> RawIFD -> SubIFD
 convertRawExifSubIFD order tiffBs rawIFD = SubIFD entries mInterop
   where
     allEntries = rifdDirectoryEntries rawIFD
-    mInterop = lookupSubIFD order tiffBs interopOffsetTag allEntries (convertRawIFD order tiffBs)
-    cleanEntries = M.filterWithKey (\k _ -> k /= interopOffsetTag) allEntries
+    mInterop = lookupSubIFD order tiffBs interopIFDOffsetTag allEntries (convertRawIFD order tiffBs)
+    cleanEntries = M.filterWithKey (\k _ -> k /= interopIFDOffsetTag) allEntries
     entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
-
-convertRawGPSIFD :: ByteOrder -> BS.ByteString -> RawIFD -> GPSIFD
-convertRawGPSIFD order tiffBs rawIFD =
-  GPSIFD $ M.mapWithKey (convertEntry order tiffBs) (rifdDirectoryEntries rawIFD)
 
 convertRawIFD :: ByteOrder -> BS.ByteString -> RawIFD -> IFD
 convertRawIFD order tiffBs rawIFD =

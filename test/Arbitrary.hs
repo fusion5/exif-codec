@@ -29,7 +29,10 @@ instance Arbitrary ExifData where
 instance Arbitrary IFD0 where
   arbitrary = sized $ \n -> do
     numEntries <- choose (0, min 5 n)
-    tags <- vectorOf numEntries (arbitrary `suchThat` (`notElem` [exifOffsetTag, gpsInfoTag]))
+    tags <-
+      vectorOf
+        numEntries
+        (arbitrary `suchThat` (`notElem` [exifSubIFDOffsetTag, gpsInfoIFDOffsetTag]))
     vals <- replicateM numEntries arbitrary
     let entries = M.fromList (zip tags vals)
     if n <= 0
@@ -39,19 +42,12 @@ instance Arbitrary IFD0 where
 instance Arbitrary SubIFD where
   arbitrary = sized $ \n -> do
     numEntries <- choose (0, min 5 n)
-    tags <- vectorOf numEntries (arbitrary `suchThat` (/= interopOffsetTag))
+    tags <- vectorOf numEntries (arbitrary `suchThat` (/= interopIFDOffsetTag))
     vals <- replicateM numEntries arbitrary
     let entries = M.fromList (zip tags vals)
     if n <= 0
       then return $ SubIFD entries Nothing
       else SubIFD entries <$> arbitrary
-
-instance Arbitrary GPSIFD where
-  arbitrary = sized $ \n -> do
-    numEntries <- choose (0, min 5 n)
-    tags <- replicateM numEntries arbitrary
-    vals <- replicateM numEntries arbitrary
-    return $ GPSIFD (M.fromList (zip tags vals))
 
 instance Arbitrary IFD where
   arbitrary = sized $ \n -> do
@@ -92,10 +88,3 @@ instance Arbitrary URational where
 
 instance Arbitrary SRational where
   arbitrary = SRational <$> arbitrary <*> arbitrary
-
-instance Arbitrary Thumbnail where
-  arbitrary =
-    oneof
-      [ JpegThumbnail . BS.pack <$> arbitrary,
-        TiffThumbnail . BS.pack <$> arbitrary
-      ]

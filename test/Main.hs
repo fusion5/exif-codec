@@ -7,6 +7,8 @@ import Data.ByteString qualified as BS
 import Data.Char (toLower)
 import Data.Either
 import Data.Map (traverseWithKey)
+import Data.Time.Calendar
+import Data.Time.LocalTime
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, (</>))
@@ -114,6 +116,12 @@ main = do
   maybeExifs <- mapM findEXIFs samples
   hspec $ do
     describe "decodeExif" $ do
+      it "parsing date time" $ do
+        case parseDateTime (ASCII "2026:11:06 15:22:56") of
+          Nothing ->
+            expectationFailure "Failed to parse local time"
+          Just localTime ->
+            localTime `shouldBe` LocalTime (fromGregorian 2026 11 6) (TimeOfDay 15 22 56)
       it "decodes EXIF metadata from raw payload" $ do
         case decodeExif helloWorldExif of
           Left err ->
@@ -148,5 +156,5 @@ main = do
             case decodeTiff tiffBS of
               Left err ->
                 expectationFailure $ "Failed to decode original camera EXIF: " <> show err
-              Right tiff -> do
+              Right tiff ->
                 decodeExif (encodeExif $ Exif tiff) `shouldBe` Right (Exif tiff)

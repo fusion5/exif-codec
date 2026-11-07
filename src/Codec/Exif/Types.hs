@@ -3,11 +3,16 @@ module Codec.Exif.Types
   )
 where
 
+import Data.Binary.Get
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as C8
+import Data.ByteString.Lazy qualified as BSL
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Map qualified as M
 import Data.Maybe (listToMaybe)
 import Data.Text ()
+import Data.Time.Calendar
+import Data.Time.LocalTime
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics (Generic)
 import Prelude
@@ -278,3 +283,40 @@ projectToInt (SignedShort (x : _)) = Just $ fromIntegral x
 projectToInt (SignedLong (x : _)) = Just $ fromIntegral x
 projectToInt (SignedLong8 (x : _)) = Just $ fromIntegral x
 projectToInt _ = Nothing
+
+runGetMaybe :: Get a -> BSL.ByteString -> Maybe a
+runGetMaybe get input = either (const Nothing) (\(_, _, a) -> Just a) (runGetOrFail get input)
+
+parseDateTime :: DirectoryEntryValue -> Maybe LocalTime
+parseDateTime (ASCII dateBS) = runGetMaybe getExifDateTime $ BSL.fromStrict dateBS
+parseDateTime _ = Nothing
+
+-- | Read `n` ASCII digits and parse them into an Int
+readDigit :: Int -> Get Int
+readDigit n = do
+  bs <- getByteString n
+  case C8.readInt bs of
+    Just (val, rest) | C8.null rest -> pure val
+    _ -> fail $ "Expected " ++ show n ++ " numeric digits, got: " ++ show bs
+
+-- | Expect a specific ASCII character
+getCharValue :: Char -> Get ()
+getCharValue expected = do
+  bs <- getByteString 1
+  case C8.uncons bs of
+    Just (c, _) | c == expected -> pure ()
+    _ -> fail $ "Expected character '" ++ [expected] ++ "', but got: " ++ show bs
+
+-- | Parse "YYYY:MM:DD HH:MM:SS" into a LocalTime
+getExifDateTime :: Get LocalTime
+getExifDateTime = do
+  year <- readDigit 4
+  month <- getCharValue ':' >> readDigit 2
+  day <- getCharValue ':' >> readDigit 2
+  hour <- getCharValue ' ' >> readDigit 2
+  minute <- getCharValue ':' >> readDigit 2
+  second <- getCharValue ':' >> readDigit 2
+  pure $
+    LocalTime
+      (fromGregorian (fromIntegral year) month day)
+      (TimeOfDay hour minute (fromIntegral second))

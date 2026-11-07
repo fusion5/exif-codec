@@ -449,7 +449,7 @@ prettyPrint Directory0 ImageResolutionUnit val@(UnsignedShort {}) = ppResolution
 prettyPrint Directory0 ImagePageNumber (UnsignedShort xs) = ppUnsignedShorts xs
 prettyPrint Directory0 ImageTransferFunction (UnsignedShort xs) = ppUnsignedShorts xs
 prettyPrint Directory0 ImageSoftware (ASCII bs) = ppASCII bs
-prettyPrint Directory0 ImageDateTime (ASCII bs) = ppASCII bs
+prettyPrint Directory0 ImageDateTime value = ppDateTime value
 prettyPrint Directory0 ImageArtist (ASCII bs) = ppASCII bs
 prettyPrint Directory0 ImageHostComputer (ASCII bs) = ppASCII bs
 prettyPrint Directory0 ImagePredictor (UnsignedShort xs) = ppUnsignedShorts xs
@@ -516,7 +516,7 @@ prettyPrint Directory0 ImageOECF (Undefined bs) = ppUndefined bs
 prettyPrint Directory0 ImageInterlace (UnsignedShort xs) = ppUnsignedShorts xs
 prettyPrint Directory0 ImageTimeZoneOffset (SignedShort xs) = ppSignedShorts xs
 prettyPrint Directory0 ImageSelfTimerMode (UnsignedShort xs) = ppUnsignedShorts xs
-prettyPrint Directory0 ImageDateTimeOriginal (ASCII bs) = ppASCII bs
+prettyPrint Directory0 ImageDateTimeOriginal value = ppDateTime value
 prettyPrint Directory0 ImageCompressedBitsPerPixel (UnsignedRational xs) = ppUnsignedRationals xs
 prettyPrint Directory0 ImageShutterSpeedValue (SignedRational xs) = ppSignedRationals xs
 prettyPrint Directory0 ImageApertureValue (UnsignedRational xs) = T.unwords $ map ppApertureUnsigned xs
@@ -616,7 +616,7 @@ prettyPrint Directory0 ImagePreviewApplicationVersion (UnsignedByte xs) = ppUnsi
 prettyPrint Directory0 ImagePreviewSettingsName (UnsignedByte xs) = ppUnsignedBytes xs
 prettyPrint Directory0 ImagePreviewSettingsDigest (UnsignedByte xs) = ppUnsignedBytes xs
 prettyPrint Directory0 ImagePreviewColorSpace (UnsignedLong xs) = ppUnsignedLongs xs
-prettyPrint Directory0 ImagePreviewDateTime (ASCII bs) = ppASCII bs
+prettyPrint Directory0 ImagePreviewDateTime value = ppDateTime value
 prettyPrint Directory0 ImageRawImageDigest (Undefined bs) = ppUndefined bs
 prettyPrint Directory0 ImageOriginalRawFileDigest (Undefined bs) = ppUndefined bs
 prettyPrint Directory0 ImageSubTileBlockSize (UnsignedLong xs) = ppUnsignedLongs xs
@@ -684,8 +684,8 @@ prettyPrint Sub PhotoISOSpeed (UnsignedLong xs) = ppUnsignedLongs xs
 prettyPrint Sub PhotoISOSpeedLatitudeyyy (UnsignedLong xs) = ppUnsignedLongs xs
 prettyPrint Sub PhotoISOSpeedLatitudezzz (UnsignedLong xs) = ppUnsignedLongs xs
 prettyPrint Sub PhotoExifVersion value = ppExifVersion value
-prettyPrint Sub PhotoDateTimeOriginal (ASCII bs) = ppASCII bs
-prettyPrint Sub PhotoDateTimeDigitized (ASCII bs) = ppASCII bs
+prettyPrint Sub PhotoDateTimeOriginal value = ppDateTime value
+prettyPrint Sub PhotoDateTimeDigitized value = ppDateTime value
 prettyPrint Sub PhotoOffsetTime (ASCII bs) = ppASCII bs
 prettyPrint Sub PhotoOffsetTimeOriginal (ASCII bs) = ppASCII bs
 prettyPrint Sub PhotoOffsetTimeDigitized (ASCII bs) = ppASCII bs
@@ -815,6 +815,11 @@ prettyPrint _dir _tag val = T.pack (show val)
 
 ppASCII :: BS.ByteString -> T.Text
 ppASCII bs = TE.decodeUtf8With TEE.lenientDecode $ BS.takeWhile (/= 0) bs
+
+ppDateTime :: DirectoryEntryValue -> T.Text
+ppDateTime value = case parseDateTime value of
+  Nothing -> unknown value
+  Just localTime -> T.show localTime
 
 ppUnsignedBytes :: [Word8] -> T.Text
 ppUnsignedBytes = T.unwords . Prelude.map ppUnsignedByte

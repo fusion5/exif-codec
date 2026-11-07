@@ -19,6 +19,7 @@ module Codec.Exif
     getDirectoryTags,
     prettyPrint,
     prettyPrintTag,
+    parseDateTime,
     module Codec.Exif.Patterns,
   )
 where
@@ -37,4 +38,5 @@ import Codec.Exif.Types
     emptyExif,
     getDirectoryTag,
     getDirectoryTags,
+    parseDateTime,
   )

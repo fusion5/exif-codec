@@ -76,5 +76,6 @@ test-suite exif-codec-test
     , filepath
     , hspec
     , QuickCheck
-    , text
+
+-- , text
 -- , binary

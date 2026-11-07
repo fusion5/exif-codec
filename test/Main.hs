@@ -13,7 +13,6 @@ import System.FilePath (takeExtension, (</>))
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Prelude
-import qualified Data.Text.IO as TIO
 
 helloWorldExif :: BS.ByteString
 helloWorldExif =
@@ -126,6 +125,16 @@ main = do
             exif2 = alterDirectoryTag exif1 Interoperability 270 (Just (ASCII "HI\NUL"))
             exif3 = alterDirectoryTag exif2 Interoperability 270 Nothing
         exif3 `shouldBe` exif1
+      it "pretty printing works" $ do
+        case decodeExif helloWorldExif of
+          Left err ->
+            expectationFailure $ "Failed to decode EXIF: " <> show err
+          Right exif -> do
+            forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
+              let tags = getDirectoryTags exif dir
+              flip traverseWithKey tags $ \tag value -> do
+                prettyPrintTag dir tag `shouldBe` "ImageImageDescription"
+                prettyPrint dir tag value `shouldBe` "hello world"
 
     describe "QuickCheck Arbitrary Exif Map" $ do
       prop "exif encode decode roundtrip Intel" $ \exif -> do
@@ -140,9 +149,4 @@ main = do
               Left err ->
                 expectationFailure $ "Failed to decode original camera EXIF: " <> show err
               Right tiff -> do
-                forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
-                  print dir
-                  let tags = getDirectoryTags (Exif tiff) dir
-                  flip traverseWithKey tags $ \k v -> do
-                    TIO.putStrLn $ prettyPrintTag dir k <> " = " <> prettyPrint dir k v
                 decodeExif (encodeExif $ Exif tiff) `shouldBe` Right (Exif tiff)

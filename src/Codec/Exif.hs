@@ -12,6 +12,9 @@ import Codec.Exif.Encode (encodeExif)
 import Codec.Exif.Types as Exports
   ( Directory (..),
     DirectoryEntryValue (..),
-    Exif(..),
-    getDirectoryTag
+    Exif (..),
+    ByteOrder (..),
+    alterDirectoryTag,
+    emptyExif,
+    getDirectoryTag,
   )

@@ -117,8 +117,13 @@ main = do
         case decodeExif helloWorldExif of
           Left err ->
             expectationFailure $ "Failed to decode EXIF: " <> show err
-          Right exif ->
+          Right exif -> do
             getDirectoryTag exif Directory0 270 `shouldBe` Just (ASCII "hello world\NUL")
+      it "alter EXIF metadata" $ do
+        let exif1 = emptyExif Motorola
+            exif2 = alterDirectoryTag exif1 Interoperability 270 (Just (ASCII "HI\NUL"))
+            exif3 = alterDirectoryTag exif2 Interoperability 270 Nothing
+        exif3 `shouldBe` exif1
 
     describe "QuickCheck Arbitrary Exif Map" $ do
       prop "exif encode decode roundtrip Intel" $ \exif ->

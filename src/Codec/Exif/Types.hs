@@ -162,6 +162,19 @@ data ExifData = ExifData
   }
   deriving (Eq, Show, Generic)
 
+emptyExif :: ByteOrder -> Exif
+emptyExif Intel = Exif (IntelOrder emptyExifData)
+emptyExif Motorola = Exif (MotorolaOrder emptyExifData)
+
+emptyExifData :: ExifData
+emptyExifData = ExifData {..}
+  where
+    exifChainedIFDs = []
+    exifIFD0 = IFD0 {..}
+    ifd0Entries = mempty
+    ifd0SubIFD = Nothing
+    ifd0GPSIFD = Nothing
+
 getExifData :: Exif -> (ByteOrder, ExifData)
 getExifData (Exif (IntelOrder exifData)) = (Intel, exifData)
 getExifData (Exif (MotorolaOrder exifData)) = (Motorola, exifData)
@@ -206,34 +219,48 @@ overSubIFD f ifd0 = ifd0 {ifd0SubIFD = f (ifd0SubIFD ifd0)}
 overGPSIFD :: (Maybe IFD -> Maybe IFD) -> IFD0 -> IFD0
 overGPSIFD f ifd0 = ifd0 {ifd0GPSIFD = f (ifd0GPSIFD ifd0)}
 
-alterTagMap ::
-  Tag -> Maybe DirectoryEntryValue -> M.Map Tag DirectoryEntryValue -> M.Map Tag DirectoryEntryValue
+alterTagMap :: Tag -> Maybe DirectoryEntryValue -> M.Map Tag DirectoryEntryValue -> M.Map Tag DirectoryEntryValue
 alterTagMap tag mVal = M.alter (const mVal) tag
+
+-- Prunes an IFD if its map becomes empty
+pruneIFD :: IFD -> Maybe IFD
+pruneIFD ifd
+  | M.null (ifdEntries ifd) = Nothing
+  | otherwise = Just ifd
+
+-- Prunes a SubIFD ONLY if both its own entries and its Interop directory are empty
+pruneSubIFD :: SubIFD -> Maybe SubIFD
+pruneSubIFD sub = case (M.null (ifdSubEntries sub), ifdSubInterop sub) of
+  (True, Nothing) -> Nothing
+  _ -> Just sub
 
 alterChainedIFDs :: Tag -> Maybe DirectoryEntryValue -> [IFD] -> [IFD]
 alterChainedIFDs _ Nothing [] = []
 alterChainedIFDs tag (Just v) [] = [IFD {ifdEntries = M.singleton tag v}]
 alterChainedIFDs tag mVal (ifd1 : xs) =
-  ifd1 {ifdEntries = alterTagMap tag mVal (ifdEntries ifd1)} : xs
+  case pruneIFD (ifd1 {ifdEntries = alterTagMap tag mVal (ifdEntries ifd1)}) of
+    Nothing -> xs -- IFD1 became empty, remove it from the chain
+    Just newIfd1 -> newIfd1 : xs
 
 alterMaybeIFD :: Tag -> Maybe DirectoryEntryValue -> Maybe IFD -> Maybe IFD
 alterMaybeIFD _ Nothing Nothing = Nothing
 alterMaybeIFD tag (Just v) Nothing = Just IFD {ifdEntries = M.singleton tag v}
-alterMaybeIFD tag mVal (Just ifd) = Just ifd {ifdEntries = alterTagMap tag mVal (ifdEntries ifd)}
+alterMaybeIFD tag mVal (Just ifd) =
+  pruneIFD (ifd {ifdEntries = alterTagMap tag mVal (ifdEntries ifd)})
 
 alterMaybeSubIFD :: Tag -> Maybe DirectoryEntryValue -> Maybe SubIFD -> Maybe SubIFD
 alterMaybeSubIFD _ Nothing Nothing = Nothing
 alterMaybeSubIFD tag (Just v) Nothing =
   Just SubIFD {ifdSubEntries = M.singleton tag v, ifdSubInterop = Nothing}
 alterMaybeSubIFD tag mVal (Just sub) =
-  Just sub {ifdSubEntries = alterTagMap tag mVal (ifdSubEntries sub)}
+  pruneSubIFD (sub {ifdSubEntries = alterTagMap tag mVal (ifdSubEntries sub)})
 
 alterMaybeInterop :: Tag -> Maybe DirectoryEntryValue -> Maybe SubIFD -> Maybe SubIFD
 alterMaybeInterop _ Nothing Nothing = Nothing
 alterMaybeInterop tag (Just v) Nothing =
   Just SubIFD {ifdSubEntries = M.empty, ifdSubInterop = Just IFD {ifdEntries = M.singleton tag v}}
 alterMaybeInterop tag mVal (Just sub) =
-  Just sub {ifdSubInterop = alterMaybeIFD tag mVal (ifdSubInterop sub)}
+  pruneSubIFD (sub {ifdSubInterop = alterMaybeIFD tag mVal (ifdSubInterop sub)})
 
 alterExifData :: ExifData -> Directory -> Tag -> Maybe DirectoryEntryValue -> ExifData
 alterExifData ed Directory0 tag mVal =

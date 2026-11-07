@@ -6,6 +6,7 @@ module Codec.Exif.Decode
 where
 
 import Codec.Exif.Types
+import Codec.Exif.Patterns
 import Control.Monad (replicateM, unless)
 import Data.Binary.Get
   ( Get,
@@ -89,16 +90,16 @@ convertRawIFD0 order tiffBs rawIFD = IFD0 entries mExif mGps
   where
     allEntries = rifdDirectoryEntries rawIFD
     mExif = lookupSubIFD order tiffBs exifSubIFDOffsetTag allEntries (convertRawExifSubIFD order tiffBs)
-    mGps = lookupSubIFD order tiffBs gpsInfoIFDOffsetTag allEntries (convertRawIFD order tiffBs)
-    cleanEntries = M.delete exifSubIFDOffsetTag $ M.delete gpsInfoIFDOffsetTag allEntries
+    mGps = lookupSubIFD order tiffBs ImageGPSTag allEntries (convertRawIFD order tiffBs)
+    cleanEntries = M.delete exifSubIFDOffsetTag $ M.delete ImageGPSTag allEntries
     entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
 
 convertRawExifSubIFD :: ByteOrder -> BS.ByteString -> RawIFD -> SubIFD
 convertRawExifSubIFD order tiffBs rawIFD = SubIFD entries mInterop
   where
     allEntries = rifdDirectoryEntries rawIFD
-    mInterop = lookupSubIFD order tiffBs interopIFDOffsetTag allEntries (convertRawIFD order tiffBs)
-    cleanEntries = M.filterWithKey (\k _ -> k /= interopIFDOffsetTag) allEntries
+    mInterop = lookupSubIFD order tiffBs PhotoInteroperabilityTag allEntries (convertRawIFD order tiffBs)
+    cleanEntries = M.filterWithKey (\k _ -> k /= PhotoInteroperabilityTag) allEntries
     entries = M.mapWithKey (convertEntry order tiffBs) cleanEntries
 
 convertRawIFD :: ByteOrder -> BS.ByteString -> RawIFD -> IFD

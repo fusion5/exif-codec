@@ -5,6 +5,7 @@ module Codec.Exif.Encode
   )
 where
 
+import Codec.Exif.Patterns
 import Codec.Exif.Types
 import Control.Monad (forM, forM_)
 import Control.Monad.State.Strict
@@ -82,7 +83,7 @@ lowerIFD0 order (IFD0 entries mExif mGps) = do
     Just gps -> do
       pending <- lowerIFDPending order gps
       rawEntry <- layoutPendingEntry order pending
-      return [(gpsInfoIFDOffsetTag, rawEntry)]
+      return [(ImageGPSTag, rawEntry)]
 
   stAfter <- get
   let ifdBlocks = reverse (lsBlocks stAfter)
@@ -119,7 +120,7 @@ lowerExifSubIFD order (SubIFD entries mInterop) = do
     Just interop -> do
       pending <- lowerIFDPending order interop
       rawEntry <- layoutPendingEntry order pending
-      return [(interopIFDOffsetTag, rawEntry)]
+      return [(PhotoInteroperabilityTag, rawEntry)]
 
   stAfter <- get
   let ifdBlocks = reverse (lsBlocks stAfter)
@@ -130,7 +131,7 @@ lowerExifSubIFD order (SubIFD entries mInterop) = do
 
 lowerIFDPending :: ByteOrder -> IFD -> LayoutM PendingDirectoryEntry
 lowerIFDPending order (IFD entries) =
-  lowerSubIFDPending order interopIFDOffsetTag (lowerLeafEntries order entries)
+  lowerSubIFDPending order PhotoInteroperabilityTag (lowerLeafEntries order entries)
 
 lowerLeafEntries :: ByteOrder -> M.Map Tag DirectoryEntryValue -> LayoutM (RawIFD, [BS.ByteString])
 lowerLeafEntries order entries = do

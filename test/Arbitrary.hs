@@ -1,5 +1,6 @@
 module Arbitrary () where
 
+import Codec.Exif.Patterns
 import Codec.Exif.Types
 import Control.Monad (replicateM)
 import Data.ByteString qualified as BS
@@ -35,7 +36,7 @@ instance Arbitrary IFD0 where
     tags <-
       vectorOf
         numEntries
-        (arbitrary `suchThat` (`notElem` [exifSubIFDOffsetTag, gpsInfoIFDOffsetTag]))
+        (arbitrary `suchThat` (`notElem` [exifSubIFDOffsetTag, ImageGPSTag]))
     vals <- replicateM numEntries arbitrary
     let entries = M.fromList (zip tags vals)
     if n <= 0
@@ -45,7 +46,7 @@ instance Arbitrary IFD0 where
 instance Arbitrary SubIFD where
   arbitrary = sized $ \n -> do
     numEntries <- choose (0, min 5 n)
-    tags <- vectorOf numEntries (arbitrary `suchThat` (/= interopIFDOffsetTag))
+    tags <- vectorOf numEntries (arbitrary `suchThat` (/= PhotoInteroperabilityTag))
     vals <- replicateM numEntries arbitrary
     let entries = M.fromList (zip tags vals)
     if n <= 0

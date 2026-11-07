@@ -47,8 +47,9 @@ library
     Codec.Exif
     Codec.Exif.Decode
     Codec.Exif.Encode
-    Codec.Exif.Types
+    Codec.Exif.Patterns
     Codec.Exif.PrettyPrint
+    Codec.Exif.Types
 
   build-depends:
     , base
@@ -65,12 +66,9 @@ test-suite exif-codec-test
   type:           exitcode-stdio-1.0
   hs-source-dirs: test
   main-is:        Main.hs
-  other-modules:
-    Arbitrary
-
+  other-modules:  Arbitrary
   build-depends:
     , base
-    -- , binary
     , bytestring
     , containers
     , directory
@@ -78,4 +76,6 @@ test-suite exif-codec-test
     , filepath
     , hspec
     , QuickCheck
-    -- , text
+
+-- , binary
+-- , text

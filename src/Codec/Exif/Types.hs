@@ -24,14 +24,6 @@ data Directory = Directory0 | Directory1 | Sub | GPS | Interoperability
 exifSubIFDOffsetTag :: Tag
 exifSubIFDOffsetTag = Tag 0x8769
 
--- | Tag 0x8825: Offset to GPS SubIFD
-gpsInfoIFDOffsetTag :: Tag
-gpsInfoIFDOffsetTag = Tag 0x8825
-
--- | Tag 0xA005: Offset to Interoperability SubIFD
-interopIFDOffsetTag :: Tag
-interopIFDOffsetTag = Tag 0xA005
-
 -- | Abstractly represents the "Exif\0\0" identifier prefix wrapping a payload.
 newtype Exif = Exif
   { exifPayload :: Tiff

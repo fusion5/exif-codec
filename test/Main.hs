@@ -13,6 +13,7 @@ import System.FilePath (takeExtension, (</>))
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Prelude
+import qualified Data.Text.IO as TIO
 
 helloWorldExif :: BS.ByteString
 helloWorldExif =
@@ -141,5 +142,6 @@ main = do
               Right tiff -> do
                 forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
                   let tags = getDirectoryTags (Exif tiff) dir
-                  flip traverseWithKey tags $ \k v -> print $ prettyPrint dir k v
+                  flip traverseWithKey tags $ \k v -> do
+                    TIO.putStrLn $ prettyPrintTag dir k <> " = " <> prettyPrint dir k v
                 decodeExif (encodeExif $ Exif tiff) `shouldBe` Right (Exif tiff)

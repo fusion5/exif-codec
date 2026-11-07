@@ -1180,3 +1180,4 @@ pattern GPSInfoGPSDifferential = Tag 0x001e
 
 pattern GPSInfoGPSHPositioningError :: Tag
 pattern GPSInfoGPSHPositioningError = Tag 0x001f
+

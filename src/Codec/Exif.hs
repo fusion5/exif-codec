@@ -18,6 +18,7 @@ module Codec.Exif
     getDirectoryTag,
     getDirectoryTags,
     prettyPrint,
+    prettyPrintTag,
     module Codec.Exif.Patterns,
   )
 where
@@ -25,7 +26,7 @@ where
 import Codec.Exif.Decode (ParseError (..), decodeExif, decodeTiff)
 import Codec.Exif.Encode (encodeExif)
 import Codec.Exif.Patterns
-import Codec.Exif.PrettyPrint (prettyPrint)
+import Codec.Exif.PrettyPrint (prettyPrint, prettyPrintTag)
 import Codec.Exif.Types
   ( ByteOrder (..),
     Directory (..),

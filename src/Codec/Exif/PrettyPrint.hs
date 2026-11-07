@@ -6,7 +6,6 @@ where
 
 import Codec.Exif.Patterns
 import Codec.Exif.Types
-import Data.Bifunctor
 import Data.ByteString qualified as BS
 import Data.Int
 import Data.Map (Map)
@@ -302,6 +301,7 @@ prettyPrintTag Sub PhotoApertureValue = "PhotoApertureValue"
 prettyPrintTag Sub PhotoBrightnessValue = "PhotoBrightnessValue"
 prettyPrintTag Sub PhotoExposureBiasValue = "PhotoExposureBiasValue"
 prettyPrintTag Sub PhotoMaxApertureValue = "PhotoMaxApertureValue"
+prettyPrintTag Sub PhotoSubjectDistanceRange = "PhotoSubjectDistanceRange"
 prettyPrintTag Sub PhotoSubjectDistance = "PhotoSubjectDistance"
 prettyPrintTag Sub PhotoMeteringMode = "PhotoMeteringMode"
 prettyPrintTag Sub PhotoLightSource = "PhotoLightSource"
@@ -718,6 +718,8 @@ prettyPrint Sub PhotoFlashpixVersion value = ppFlashPixVersion value
 prettyPrint Sub PhotoColorSpace value = ppColorSpace value
 prettyPrint Sub PhotoPixelXDimension (UnsignedLong xs) = ppUnsignedLongs xs
 prettyPrint Sub PhotoPixelYDimension (UnsignedLong xs) = ppUnsignedLongs xs
+prettyPrint Sub PhotoPixelXDimension (UnsignedShort xs) = ppUnsignedShorts xs
+prettyPrint Sub PhotoPixelYDimension (UnsignedShort xs) = ppUnsignedShorts xs
 prettyPrint Sub PhotoRelatedSoundFile (ASCII bs) = ppASCII bs
 prettyPrint Sub PhotoInteroperabilityTag (UnsignedLong xs) = ppUnsignedLongs xs
 prettyPrint Sub PhotoFlashEnergy (UnsignedRational xs) = ppUnsignedRationals xs
@@ -833,13 +835,13 @@ ppUnsignedLong :: Word32 -> T.Text
 ppUnsignedLong = T.pack . show
 
 ppUnsignedRationals :: [URational] -> T.Text
-ppUnsignedRationals xs = T.pack (show xs)
+ppUnsignedRationals = T.unwords . Prelude.map ppUnsignedRational
 
 ppSignedShorts :: [Int16] -> T.Text
 ppSignedShorts xs = T.pack (show xs)
 
 ppSignedRationals :: [SRational] -> T.Text
-ppSignedRationals xs = T.pack (show xs)
+ppSignedRationals = T.unwords . Prelude.map ppSignedRational
 
 ppSingleFloats :: [Float] -> T.Text
 ppSingleFloats xs = T.pack (show xs)
@@ -864,6 +866,12 @@ ppResolutionUnit =
 
 ppYCbCrPositioning :: DirectoryEntryValue -> T.Text
 ppYCbCrPositioning = fromNumberMap [(1, "Centered"), (2, "Co-sited")]
+
+ppUnsignedRational :: URational -> Text
+ppUnsignedRational (URational {..}) = T.pack $ printf "%d/%d" urNumerator urDenominator
+
+ppSignedRational :: SRational -> Text
+ppSignedRational (SRational {..}) = T.pack $ printf "%d/%d" srNumerator srDenominator
 
 -- ! Pretty-print aperture stored as APEX value.
 -- See: https://photo.stackexchange.com/questions/19143/how-can-the-aperture-value-written-in-exif-be-larger-than-the-nominal-limit-of-t
@@ -1109,22 +1117,12 @@ ppFileSource (Undefined v)
 ppFileSource v = unknown v
 
 fromNumberMap :: [(Int, Text)] -> DirectoryEntryValue -> Text
-fromNumberMap m = fromMap convertedMap
-  where
-    convertedMap = M.unions convertedMaps
-    convertedMaps =
-      [ M.fromList $ fmap (first $ UnsignedByte . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ UnsignedShort . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ UnsignedLong . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ UnsignedLong8 . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ SignedByte . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ SignedShort . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ SignedLong . pure . fromIntegral) m,
-        M.fromList $ fmap (first $ SignedLong8 . pure . fromIntegral) m
-      ]
+fromNumberMap m = fromMap (M.fromList m)
 
-fromMap :: Map DirectoryEntryValue Text -> DirectoryEntryValue -> Text
-fromMap m v = M.findWithDefault (unknown v) v m
+fromMap :: Map Int Text -> DirectoryEntryValue -> Text
+fromMap m v = case projectToInt v of
+  Just intValue -> M.findWithDefault (unknown v) intValue m
+  Nothing -> unknown v
 
 unknown :: (Show a) => a -> Text
 unknown v = T.pack $ "Unknown value: " ++ show v

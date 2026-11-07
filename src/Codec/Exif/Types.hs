@@ -19,6 +19,7 @@ mkTag :: Word16 -> Tag
 mkTag = Tag
 
 data Directory = Directory0 | Directory1 | Sub | GPS | Interoperability
+  deriving (Show)
 
 -- | Tag 0x8769: Offset to Exif SubIFD
 exifSubIFDOffsetTag :: Tag
@@ -263,3 +264,17 @@ alterExifData ed GPS tag mVal =
   (overIFD0 . overGPSIFD) (alterMaybeIFD tag mVal) ed
 alterExifData ed Interoperability tag mVal =
   (overIFD0 . overSubIFD) (alterMaybeInterop tag mVal) ed
+
+-- | Used by the pretty printer, in combination with fromNumberMap
+projectToInt :: DirectoryEntryValue -> Maybe Int
+projectToInt (UnsignedByte (x : _)) = Just $ fromIntegral x
+projectToInt (ASCII bs) = fromIntegral . fst <$> BS.uncons bs
+projectToInt (UnsignedShort (x : _)) = Just $ fromIntegral x
+projectToInt (UnsignedLong (x : _)) = Just $ fromIntegral x
+projectToInt (UnsignedLong8 (x : _)) = Just $ fromIntegral x
+projectToInt (SignedByte (x : _)) = Just $ fromIntegral x
+projectToInt (Undefined bs) = fromIntegral . fst <$> BS.uncons bs
+projectToInt (SignedShort (x : _)) = Just $ fromIntegral x
+projectToInt (SignedLong (x : _)) = Just $ fromIntegral x
+projectToInt (SignedLong8 (x : _)) = Just $ fromIntegral x
+projectToInt _ = Nothing

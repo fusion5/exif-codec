@@ -141,6 +141,7 @@ main = do
                 expectationFailure $ "Failed to decode original camera EXIF: " <> show err
               Right tiff -> do
                 forM_ [Directory0, Directory1, Sub, GPS, Interoperability] $ \dir -> do
+                  print dir
                   let tags = getDirectoryTags (Exif tiff) dir
                   flip traverseWithKey tags $ \k v -> do
                     TIO.putStrLn $ prettyPrintTag dir k <> " = " <> prettyPrint dir k v

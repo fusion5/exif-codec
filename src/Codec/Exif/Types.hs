@@ -164,6 +164,17 @@ data ExifData = ExifData
   }
   deriving (Eq, Show, Generic)
 
+data Orientation
+  = Normal -- 1: Top-Left (No rotation)
+  | MirrorHorizontal -- 2: Top-Right (Flipped horizontally)
+  | Rotate180 -- 3: Bottom-Right (Rotated 180 degrees)
+  | MirrorVertical -- 4: Bottom-Left (Flipped vertically)
+  | MirrorAndRotate270CW -- 5: Left-Top (Transposed / Mirrored horizontally & Rotated 270° CW)
+  | Rotate90CW -- 6: Right-Top (Rotated 90° CW)
+  | MirrorAndRotate90CW -- 7: Right-Bottom (Transverse / Mirrored horizontally & Rotated 90° CW)
+  | Rotate270CW -- 8: Left-Bottom (Rotated 270° CW / 90° CCW)
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
 emptyExif :: ByteOrder -> Exif
 emptyExif Intel = Exif (IntelOrder emptyExifData)
 emptyExif Motorola = Exif (MotorolaOrder emptyExifData)
@@ -290,6 +301,13 @@ runGetMaybe get input = either (const Nothing) (\(_, _, a) -> Just a) (runGetOrF
 parseDateTime :: DirectoryEntryValue -> Maybe LocalTime
 parseDateTime (ASCII dateBS) = runGetMaybe getExifDateTime $ BSL.fromStrict dateBS
 parseDateTime _ = Nothing
+
+parseOrientation :: DirectoryEntryValue -> Maybe Orientation
+parseOrientation val = projectToInt val >>= mkOrientation
+  where
+    mkOrientation n
+      | n >= 1 && n <= 8 = Just $ toEnum $ n - 1
+      | otherwise = Nothing
 
 -- | Read `n` ASCII digits and parse them into an Int
 readDigit :: Int -> Get Int

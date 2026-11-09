@@ -13,6 +13,7 @@ module Codec.Exif
     DirectoryEntryValue (..),
     Exif (..),
     ByteOrder (..),
+    Orientation (..),
     alterDirectoryTag,
     emptyExif,
     getDirectoryTag,
@@ -20,6 +21,7 @@ module Codec.Exif
     prettyPrint,
     prettyPrintTag,
     parseDateTime,
+    parseOrientation,
     module Codec.Exif.Patterns,
   )
 where
@@ -33,10 +35,12 @@ import Codec.Exif.Types
     Directory (..),
     DirectoryEntryValue (..),
     Exif (..),
+    Orientation (..),
     Tag,
     alterDirectoryTag,
     emptyExif,
     getDirectoryTag,
     getDirectoryTags,
     parseDateTime,
+    parseOrientation,
   )
